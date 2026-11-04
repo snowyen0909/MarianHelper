@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
         val prefs = Prefs(this)
         setContent {
             val ctx = LocalContext.current
-            val scheme = if (isSystemInDarkTheme()) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+            val scheme = appColorScheme(ctx, isSystemInDarkTheme())
             MaterialTheme(colorScheme = scheme) {
                 SettingsScreen(prefs) {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -146,9 +146,9 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("懸浮窗", style = MaterialTheme.typography.titleSmall)
+                                Text("懸浮 HUD", style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    if (overlayOn) "顯示中（長按懸浮窗 1 秒可隱藏）"
+                                    if (overlayOn) "顯示中：點圓鈕展開面板，長按可隱藏"
                                     else "已隱藏，打開這裡或用快速設定面板重新顯示",
                                     style = MaterialTheme.typography.bodySmall,
                                 )

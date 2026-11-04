@@ -5,21 +5,25 @@ import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
 import android.view.Gravity
-import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,7 +37,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.random.Random
 
-class AutoService : AccessibilityService(), Actions {
+class AutoService : AccessibilityService(), Actions, HudCallbacks {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val main = Handler(Looper.getMainLooper())
@@ -44,18 +48,21 @@ class AutoService : AccessibilityService(), Actions {
     /** 縮小畫面（720 寬）→ 實際螢幕的比例。 */
     @Volatile private var scale = 1f
 
-    private var overlay: LinearLayout? = null
-    private var btn: TextView? = null
-    private var statusView: TextView? = null
+    private var overlay: ComposeView? = null
     private var overlayParams: WindowManager.LayoutParams? = null
+    private var hudLifecycle: OverlayLifecycleOwner? = null
+    private var hudExpanded by mutableStateOf(false)
+    private var hudOnRight by mutableStateOf(false)
 
-    /** 懸浮窗在實際螢幕上的範圍（多留邊距，涵蓋狀態列偏移）。 */
+    /** HUD 在實際螢幕上的範圍（多留邊距）。截圖辨識時排除這塊。 */
     private val overlayRect: android.graphics.Rect?
         get() {
-            val p = overlayParams ?: return null
             val v = overlay ?: return null
-            val m = 80
-            return android.graphics.Rect(p.x - m, p.y - m, p.x + v.width + m, p.y + v.height + m * 2)
+            if (v.visibility != View.VISIBLE || v.width == 0) return null
+            val loc = IntArray(2)
+            v.getLocationOnScreen(loc)
+            val m = 24
+            return android.graphics.Rect(loc[0] - m, loc[1] - m, loc[0] + v.width + m, loc[1] + v.height + m)
         }
 
     override fun onServiceConnected() {
@@ -71,6 +78,7 @@ class AutoService : AccessibilityService(), Actions {
 
     /** 設定頁切換開關時立即更新懸浮窗。 */
     private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        prefVersion.value++
         main.post { updateOverlayVisibility() }
     }
 
@@ -79,7 +87,7 @@ class AutoService : AccessibilityService(), Actions {
 
     private fun updateOverlayVisibility() {
         val show = prefs.showOverlay && (!prefs.overlayOnlyInGame || inGame)
-        overlay?.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+        overlay?.visibility = if (show) View.VISIBLE else View.GONE
         // 懸浮窗被隱藏時，順便停止腳本，避免在其他 App 上亂點
         if (!show && running.value) stopBot()
     }
@@ -90,6 +98,7 @@ class AutoService : AccessibilityService(), Actions {
         scope.cancel()
         reader.close()
         overlay?.let { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) }
+        hudLifecycle?.stop()
         instance = null
         connected.value = false
         super.onDestroy()
@@ -116,7 +125,7 @@ class AutoService : AccessibilityService(), Actions {
         if (loop?.isActive == true) return
         val bot = Bot(prefs, this)
         running.value = true
-        updateButton()
+        hudExpanded = false   // 開始後收起面板，避免擋住遊戲畫面
         loop = scope.launch {
             status("啟動中…")
             while (isActive) {
@@ -140,8 +149,11 @@ class AutoService : AccessibilityService(), Actions {
                     }
                     crop.recycle()
                     shot.recycle()
-                    // 懸浮窗自己的文字也會被截到，要排除
+                    // HUD 自己的文字和顏色也會被截到，要排除
                     val ov = overlayRect
+                    Vision.hudRect = ov?.let {
+                        android.graphics.RectF(it.left / scale, it.top / scale, it.right / scale, it.bottom / scale)
+                    }
                     val lines = (reader.read(small) + extra).filter { l ->
                         ov == null || !ov.contains(
                             (l.box.exactCenterX() * scale).toInt(),
@@ -163,7 +175,6 @@ class AutoService : AccessibilityService(), Actions {
         loop?.cancel()
         loop = null
         running.value = false
-        updateButton()
         status("已停止")
     }
 
@@ -245,7 +256,6 @@ class AutoService : AccessibilityService(), Actions {
 
     override fun status(text: String) {
         lastStatus.value = text
-        main.post { statusView?.text = text }
     }
 
     override fun stopWithAlert(title: String, body: String) {
@@ -267,10 +277,8 @@ class AutoService : AccessibilityService(), Actions {
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
     }
 
-    @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
     private fun showOverlay() {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        val dp = resources.displayMetrics.density
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -283,60 +291,60 @@ class AutoService : AccessibilityService(), Actions {
             y = (resources.displayMetrics.heightPixels * 0.42f).toInt()
         }
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((8 * dp).toInt(), (6 * dp).toInt(), (8 * dp).toInt(), (6 * dp).toInt())
-            background = GradientDrawable().apply {
-                cornerRadius = 14 * dp
-                setColor(Color.argb(200, 30, 30, 36))
-            }
-        }
-        val b = TextView(this).apply {
-            textSize = 15f
-            setTextColor(Color.WHITE)
-            text = "▶ 開始"
-        }
-        val s = TextView(this).apply {
-            textSize = 11f
-            setTextColor(Color.argb(220, 200, 200, 210))
-            maxWidth = (140 * dp).toInt()
-            text = "待命"
-        }
-        root.addView(b)
-        root.addView(s)
-
-        // 拖曳移動；沒拖動就當作點擊切換開始/停止；長按 0.8 秒隱藏懸浮窗
-        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var moved = false
-        var downAt = 0L
-        root.setOnTouchListener { _, e ->
-            when (e.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY; startX = params.x; startY = params.y; moved = false
-                    downAt = System.currentTimeMillis()
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = e.rawX - downX; val dy = e.rawY - downY
-                    if (dx * dx + dy * dy > 100) moved = true
-                    params.x = startX + dx.toInt(); params.y = startY + dy.toInt()
-                    wm.updateViewLayout(root, params)
-                }
-                MotionEvent.ACTION_UP -> if (!moved) {
-                    if (System.currentTimeMillis() - downAt > 800) {
-                        prefs.showOverlay = false
-                        android.widget.Toast.makeText(this, "懸浮窗已隱藏，可在 App 設定中重新開啟", android.widget.Toast.LENGTH_SHORT).show()
-                    } else toggle()
+        val owner = OverlayLifecycleOwner().also { it.start() }
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
+            setContent {
+                val dark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                    Configuration.UI_MODE_NIGHT_YES
+                MaterialTheme(colorScheme = appColorScheme(this@AutoService, dark)) {
+                    Hud(prefs, hudExpanded, hudOnRight, this@AutoService)
                 }
             }
-            true
         }
-
-        wm.addView(root, params)
-        overlay = root; btn = b; statusView = s
+        wm.addView(view, params)
+        overlay = view
         overlayParams = params
+        hudLifecycle = owner
     }
 
-    private fun updateButton() = main.post {
-        btn?.text = if (running.value) "■ 停止" else "▶ 開始"
+    // ---------------- HUD 回呼 ----------------
+
+    override fun toggleExpanded() { hudExpanded = !hudExpanded }
+
+    override fun startStop() = toggle()
+
+    override fun hide() {
+        hudExpanded = false
+        prefs.showOverlay = false
+        android.widget.Toast.makeText(this, "HUD 已隱藏，可在 App 首頁或快速設定面板重新開啟", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    override fun drag(dx: Float, dy: Float) {
+        val p = overlayParams ?: return
+        val v = overlay ?: return
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        // 靠右時 x 是距離右邊的距離，拖動方向相反
+        val right = (p.gravity and Gravity.END) == Gravity.END
+        p.x = (p.x + if (right) -dx else dx).toInt().coerceAtLeast(0)
+        p.y = (p.y + dy).toInt().coerceIn(0, resources.displayMetrics.heightPixels - v.height)
+        wm.updateViewLayout(v, p)
+    }
+
+    /** 放開後貼齊最近的左右邊緣，面板會往螢幕內側展開。 */
+    override fun dragEnd() {
+        val p = overlayParams ?: return
+        val v = overlay ?: return
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val sw = resources.displayMetrics.widthPixels
+        val loc = IntArray(2)
+        v.getLocationOnScreen(loc)
+        val onRight = loc[0] + v.width / 2 > sw / 2
+        p.gravity = Gravity.TOP or (if (onRight) Gravity.END else Gravity.START)
+        p.x = 0
+        hudOnRight = onRight
+        wm.updateViewLayout(v, p)
     }
 
     companion object {
@@ -345,5 +353,7 @@ class AutoService : AccessibilityService(), Actions {
         val connected = MutableStateFlow(false)
         val running = MutableStateFlow(false)
         val lastStatus = MutableStateFlow("待命")
+        /** 設定有變動就 +1，讓 HUD 重新讀取開關狀態。 */
+        val prefVersion = MutableStateFlow(0)
     }
 }

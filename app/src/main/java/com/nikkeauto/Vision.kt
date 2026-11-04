@@ -231,6 +231,9 @@ object Vision {
                 r.cy > d.b - 10 && r.cy < d.b + d.h * 4.5f
         }.minByOrNull { abs(it.cy - d.b) + abs(it.cx - d.cx) }
 
+    /** HUD 在縮小畫面上的範圍，由 AutoService 每輪更新。 */
+    @Volatile var hudRect: android.graphics.RectF? = null
+
     private var uiTop = 0f
     private var uiExclude: List<android.graphics.RectF> = emptyList()
 
@@ -238,6 +241,7 @@ object Vision {
     private fun inUi(bl: Blob, w: Int, h: Int): Boolean {
         if (bl.cy < uiTop) return true                    // 資源列、任務欄
         if (bl.cy > h * 0.89f) return true                // 返回鍵、區域切換
+        if (hudRect?.contains(bl.cx, bl.cy) == true) return true
         return uiExclude.any { it.contains(bl.cx, bl.cy) }
     }
 
