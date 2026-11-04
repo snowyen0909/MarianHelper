@@ -29,8 +29,8 @@ object Vision {
     data class Pt(val x: Float, val y: Float)
 
     data class MapScan(
-        /** 主線目標：驚嘆號 + 其下方的怪物圈（可能為 null，代表下方看不到怪）。 */
-        val mains: List<Pair<Blob, Blob?>>,
+        /** 主線目標：驚嘆號 + 其下方怪物的位置（null 代表下方看不到怪）。 */
+        val mains: List<Pair<Blob, Pt?>>,
         /** 不屬於主線也不屬於支線的紅圈怪。 */
         val redRings: List<Blob>,
         val sideDiamonds: List<Blob>,
@@ -66,9 +66,8 @@ object Vision {
 
         val used = HashSet<Blob>()
         val mains = mainDiamonds.map { d ->
-            val ring = ringBelow(d, rings)
-            if (ring != null) used += ring
-            d to ring
+            ringBelow(d, rings)?.let { used += it }
+            d to monsterBelow(px, w, h, d)
         }
         // 支線驚嘆號下方的圈不算普通怪
         sideDiamonds.forEach { d -> ringBelow(d, rings)?.let { used += it } }
@@ -183,6 +182,38 @@ object Vision {
         return total > 0 && white.toFloat() / total >= 0.12f
     }
 
+    /**
+     * 在驚嘆號正下方找主線怪。主線怪腳下是「粉紅光圈＋亮藍六角形」，
+     * 常被怪物的腳擋成好幾段，所以不找完整橢圓，而是：
+     * 由上往下掃，找到第一列有粉紅/亮藍像素的位置，取該段的中心。
+     */
+    private fun monsterBelow(px: IntArray, w: Int, h: Int, d: Blob): Pt? {
+        val x0 = max(0, (d.cx - d.w).toInt())
+        val x1 = min(w - 1, (d.cx + d.w).toInt())
+        val y0 = d.b + 4
+        val y1 = min((h * 0.9f).toInt(), (d.b + 4 + d.h * 4.5f).toInt())
+        if (y0 >= y1) return null
+        val hsv = FloatArray(3)
+        fun hit(x: Int, y: Int): Boolean {
+            android.graphics.Color.colorToHSV(px[y * w + x], hsv)
+            val hu = hsv[0]; val s = hsv[1]; val v = hsv[2] * 255f
+            val pink = (hu >= 315f || hu <= 16f) && s >= 0.28f && v >= 140f
+            val blue = hu in 195f..235f && s >= 0.45f && v >= 150f
+            return pink || blue
+        }
+        var start = -1
+        for (y in y0..y1) {
+            var n = 0
+            for (x in x0..x1) if (hit(x, y)) n++
+            if (n >= 3) { start = y; break }
+        }
+        if (start < 0) return null
+        val end = min(y1, start + (d.h * 1.4f).toInt())
+        var sx = 0f; var sy = 0f; var n = 0
+        for (y in start..end) for (x in x0..x1) if (hit(x, y)) { sx += x; sy += y; n++ }
+        return if (n >= 40) Pt(sx / n, sy / n) else null
+    }
+
     /** 俯視角下的扁橢圓光圈：寬大於高、中空。 */
     private fun isRing(bl: Blob): Boolean =
         bl.w in 40..280 && bl.h in 15..150 &&
@@ -196,10 +227,8 @@ object Vision {
 
     /** 遊戲固定 UI 的位置（以畫面比例表示），這些地方的顏色不算目標。 */
     private fun inUi(bl: Blob, w: Int, h: Int): Boolean {
-        val fx = bl.cx / w
         val fy = bl.cy / h
-        return fy < 0.15f ||                              // 資源列、任務列
-            (fx < 0.42f && fy < 0.20f) ||                 // 左上「野外」標籤一帶（小地圖會先被關掉）
+        return fy < 0.10f ||                              // 資源列、任務列（小地圖會先被關掉）
             fy > 0.89f                                     // 返回鍵、區域切換
     }
 

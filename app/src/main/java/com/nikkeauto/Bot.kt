@@ -109,13 +109,13 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         // 1. 主線驚嘆號（離隊伍最近的優先）
         val main = scan.mains.minByOrNull { (d, _) -> hypot(d.cx - me.x, d.cy - me.y) }
         if (main != null) {
-            val (diamond, ring) = main
-            if (ring == null) {
+            val (diamond, monster) = main
+            if (monster == null) {
                 act.status("點驚嘆號，跳轉視角")
                 tapTarget(Vision.Pt(diamond.cx, diamond.cy), bmp)
                 return
             }
-            val target = Vision.Pt(ring.cx, ring.cy)
+            val target = monster
 
             // 2. 卡住偵測：連續點同一個目標但隊伍沒動
             if (isStuck(target)) {
@@ -130,6 +130,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
 
             // 3. 路線上有紅圈怪就先打
             val block = Vision.blocker(scan, me, target)
+                ?.takeIf { hypot(it.cx - target.x, it.cy - target.y) > diamond.w }  // 主線怪自己的光圈碎片不算
             if (block != null) {
                 act.status("前方有怪擋路 → 先打")
                 tapTarget(Vision.Pt(block.cx, block.cy), bmp)
