@@ -94,6 +94,16 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 act.humanDelay()
             }
 
+            ScreenType.MISSION -> {
+                // 誤開了任務視窗（MISSION），點視窗右上角的 X
+                val title = ScreenReader.find(lines, "MISSION")!!
+                val guess = Vision.Pt(w * 0.91f, title.box.exactCenterY() - h * 0.035f)
+                val x = Vision.whiteCenter(bmp, guess.x, guess.y, (w * 0.05f).toInt()) ?: guess
+                act.status("關閉任務視窗")
+                act.tap(x.x, x.y, precise = true)
+                act.humanDelay()
+            }
+
             ScreenType.ENTER_PANEL -> {
                 val enter = lines.first { ScreenReader.isEnterButton(it) }
                 act.status("設施面板 → 進入")
@@ -151,17 +161,21 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 if (quest != null && quest.norm.contains("前往") && questTaps < 3) {
                     if (tapQuestArrow(bmp, quest)) return
                 }
-                handleMap(bmp)
+                handleMap(bmp, lines, counter)
             }
 
             ScreenType.UNKNOWN -> act.status("戰鬥中 / 讀取中…")
         }
     }
 
-    private suspend fun handleMap(bmp: Bitmap) {
+    private suspend fun handleMap(bmp: Bitmap, lines: List<TextLine>, counter: TextLine?) {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
-        val scan = Vision.scanMap(bmp)
+        // 任務欄（含左邊藍色圓形 !）以上全部當 UI；讀不到任務欄時用 13%
+        val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
+        val topCut = quest?.let { it.box.bottom + it.box.height() * 0.8f } ?: (h * 0.13f)
+        val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box) })
+        val scan = Vision.scanMap(bmp, topCut, exclude)
         val me = Vision.player(bmp.width, bmp.height)
 
         // 1. 主線驚嘆號（離隊伍最近的優先）

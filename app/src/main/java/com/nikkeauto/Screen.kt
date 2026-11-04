@@ -14,6 +14,7 @@ enum class ScreenType(val label: String) {
     STORY("劇情"),
     DIALOG_LOG("對話紀錄"),
     CHAPTER_LIST("章節清單"),
+    MISSION("任務視窗"),
     TAP_ANY("結算/解鎖"),
     PREPARE("出擊準備"),
     ENTER_PANEL("設施面板"),
@@ -97,6 +98,8 @@ class ScreenReader {
             val skip = findWord(lines, "SKIP")
             if (skip != null && skip.box.centerY() < height * 0.12f) return ScreenType.STORY
             if (find(lines, "CHAPTERLIST") != null) return ScreenType.CHAPTER_LIST
+            val mission = find(lines, "MISSION")
+            if (mission != null && mission.box.centerY() < height * 0.35f) return ScreenType.MISSION
             if (find(lines, "點擊任意", "点击任意", "點擊繼續", "点击继续") != null) return ScreenType.TAP_ANY
             if (find(lines, "進入戰鬥", "进入战斗") != null) return ScreenType.PREPARE
             // 設施面板：下方有「關閉」和「進入」兩顆按鈕

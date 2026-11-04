@@ -49,7 +49,13 @@ object Vision {
         return Bitmap.createScaledBitmap(soft, WIDTH, h, true)
     }
 
-    fun scanMap(bmp: Bitmap): MapScan {
+    /**
+     * @param topCut 這條線以上都是 UI（資源列、任務欄），依任務欄文字的實際位置算出，換設備也適用。
+     * @param exclude 額外要排除的範圍，例如開著的小地圖。
+     */
+    fun scanMap(bmp: Bitmap, topCut: Float, exclude: List<android.graphics.RectF> = emptyList()): MapScan {
+        uiTop = topCut
+        uiExclude = exclude
         val w = bmp.width
         val h = bmp.height
         val px = IntArray(w * h)
@@ -225,20 +231,18 @@ object Vision {
                 r.cy > d.b - 10 && r.cy < d.b + d.h * 4.5f
         }.minByOrNull { abs(it.cy - d.b) + abs(it.cx - d.cx) }
 
-    /** 遊戲固定 UI 的位置（以畫面比例表示），這些地方的顏色不算目標。 */
+    private var uiTop = 0f
+    private var uiExclude: List<android.graphics.RectF> = emptyList()
+
+    /** 遊戲固定 UI 的位置，這些地方的顏色不算目標。 */
     private fun inUi(bl: Blob, w: Int, h: Int): Boolean {
-        val fy = bl.cy / h
-        return fy < 0.10f ||                              // 資源列、任務列（小地圖會先被關掉）
-            fy > 0.89f                                     // 返回鍵、區域切換
+        if (bl.cy < uiTop) return true                    // 資源列、任務欄
+        if (bl.cy > h * 0.89f) return true                // 返回鍵、區域切換
+        return uiExclude.any { it.contains(bl.cx, bl.cy) }
     }
 
-    /**
-     * 由小地圖下方「0/14」計數的位置，推算右上角 X 的位置。
-     * 小地圖是正方形；左上角小地圖左緣約在 3.5% 寬，放大後的地圖則置中。
-     * 推算後再在附近找白色叉叉的像素，取中心點微調。
-     */
-    fun minimapClosePoint(bmp: Bitmap, counter: android.graphics.Rect): Pt? {
-        val w = bmp.width.toFloat()
+    /** 由「0/14」計數推算小地圖的範圍（正方形）。 */
+    fun minimapRect(w: Float, counter: android.graphics.Rect): android.graphics.RectF {
         val cr = counter.right.toFloat()
         val right: Float
         val size: Float
@@ -251,9 +255,19 @@ object Vision {
             size = right - left
         }
         val bottom = counter.exactCenterY() + 0.11f * size
-        val top = bottom - size
-        val px = right - 0.11f * size
-        val py = top + 0.09f * size
+        return android.graphics.RectF(right - size, bottom - size, right, bottom)
+    }
+
+    /**
+     * 由小地圖下方「0/14」計數的位置，推算右上角 X 的位置。
+     * 小地圖是正方形；左上角小地圖左緣約在 3.5% 寬，放大後的地圖則置中。
+     * 推算後再在附近找白色叉叉的像素，取中心點微調。
+     */
+    fun minimapClosePoint(bmp: Bitmap, counter: android.graphics.Rect): Pt? {
+        val box = minimapRect(bmp.width.toFloat(), counter)
+        val size = box.width()
+        val px = box.right - 0.11f * size
+        val py = box.top + 0.09f * size
 
         val r = (0.07f * size).toInt().coerceAtLeast(6)
         val hsv = FloatArray(3)

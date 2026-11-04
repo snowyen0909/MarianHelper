@@ -97,10 +97,24 @@ class AutoService : AccessibilityService(), Actions {
                     if (shot == null) { delay(700); continue }
                     scale = shot.width / Vision.WIDTH.toFloat()
                     val small = Vision.normalize(shot)
+                    // 左上角（小地圖計數、場景標籤）字很小，用原始解析度再讀一次
+                    val crop = Bitmap.createBitmap(shot, 0, 0, shot.width / 2, (shot.height * 0.4f).toInt())
+                    val extra = reader.read(crop).map { l ->
+                        val b = l.box
+                        TextLine(
+                            l.text,
+                            android.graphics.Rect(
+                                (b.left / scale).toInt(), (b.top / scale).toInt(),
+                                (b.right / scale).toInt(), (b.bottom / scale).toInt(),
+                            ),
+                            l.isWord,
+                        )
+                    }
+                    crop.recycle()
                     shot.recycle()
                     // 懸浮窗自己的文字也會被截到，要排除
                     val ov = overlayRect
-                    val lines = reader.read(small).filter { l ->
+                    val lines = (reader.read(small) + extra).filter { l ->
                         ov == null || !ov.contains(
                             (l.box.exactCenterX() * scale).toInt(),
                             (l.box.exactCenterY() * scale).toInt(),
