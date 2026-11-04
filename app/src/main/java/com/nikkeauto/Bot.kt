@@ -240,6 +240,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                     tapTarget(Vision.Pt(near.cx, near.cy), bmp)
                     return
                 }
+                // 沒有怪擋路還是走不過去，多半是門關著，要踩踏板
+                if (sameTargetCount >= 6) {
+                    act.stopWithAlert("可能被門擋住，已停止", "主線怪走不過去，可能需要先踩地上的踏板開門，請手動處理後再開始。")
+                    return
+                }
             }
 
             // 3. 路線上有紅圈怪就先打
@@ -382,6 +387,12 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             0f to d, 0f to -d, 0f to -d, 0f to d,
             d to 0f, -d to 0f, -d to 0f, d to 0f,
         )
+        // 探路兩整輪都沒找到目標，多半是門關著或需要踩踏板
+        if (patrolStep >= moves.size * 2) {
+            act.stopWithAlert("找不到目標，已停止", "探路兩輪都沒找到主線目標，可能需要先踩地上的踏板開門，請手動處理後再開始。")
+            patrolStep = 0
+            return
+        }
         val (dx, dy) = moves[patrolStep % moves.size]
         act.status("探路中（${patrolStep % moves.size + 1}/${moves.size}）")
         act.swipe(cx, cy, cx + dx, cy + dy, 500)

@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -152,6 +154,21 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     prefs.onlyMain) { prefs.onlyMain = it }
             }
 
+            // 懸浮窗
+            Card(Modifier.fillMaxWidth()) {
+                Text(
+                    "懸浮窗",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp),
+                )
+                ToggleRow(Icons.Filled.Visibility, "顯示懸浮窗", "也可以長按懸浮窗 1 秒來隱藏",
+                    prefs.showOverlay) { prefs.showOverlay = it }
+                HorizontalDivider()
+                ToggleRow(Icons.Filled.SportsEsports, "只在遊戲中顯示", "離開妮姬時自動隱藏並停止腳本",
+                    prefs.overlayOnlyInGame) { prefs.overlayOnlyInGame = it }
+            }
+
             // 延遲
             Card(Modifier.fillMaxWidth()) {
                 var range by remember {
@@ -194,7 +211,8 @@ private fun ToggleRow(
     initial: Boolean,
     onChange: (Boolean) -> Unit,
 ) {
-    var checked by remember { mutableStateOf(initial) }
+    // 以 initial 為 key：長按懸浮窗隱藏後，回到 App 開關會跟著更新
+    var checked by remember(initial) { mutableStateOf(initial) }
     ListItem(
         leadingContent = { Icon(icon, null) },
         headlineContent = { Text(title) },

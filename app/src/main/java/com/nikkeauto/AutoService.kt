@@ -64,11 +64,29 @@ class AutoService : AccessibilityService(), Actions {
         reader = ScreenReader()
         createChannel()
         showOverlay()
+        prefs.listen(prefListener)
+        updateOverlayVisibility()
         connected.value = true
+    }
+
+    /** 設定頁切換開關時立即更新懸浮窗。 */
+    private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        main.post { updateOverlayVisibility() }
+    }
+
+    /** 目前前景的 App 是不是妮姬（或本 App 自己）。 */
+    @Volatile private var inGame = true
+
+    private fun updateOverlayVisibility() {
+        val show = prefs.showOverlay && (!prefs.overlayOnlyInGame || inGame)
+        overlay?.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+        // 懸浮窗被隱藏時，順便停止腳本，避免在其他 App 上亂點
+        if (!show && running.value) stopBot()
     }
 
     override fun onDestroy() {
         stopBot()
+        prefs.unlisten(prefListener)
         scope.cancel()
         reader.close()
         overlay?.let { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) }
@@ -77,7 +95,17 @@ class AutoService : AccessibilityService(), Actions {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        // 系統介面（通知欄、輸入法、權限視窗）不算切換 App
+        if (pkg == "com.android.systemui" || pkg.contains("inputmethod") || pkg.contains("keyboard")) return
+        val now = pkg.contains("nikke", ignoreCase = true)
+        if (now != inGame) {
+            inGame = now
+            main.post { updateOverlayVisibility() }
+        }
+    }
     override fun onInterrupt() {}
 
     // ---------------- 開始 / 停止 ----------------
@@ -277,12 +305,14 @@ class AutoService : AccessibilityService(), Actions {
         root.addView(b)
         root.addView(s)
 
-        // 拖曳移動；沒拖動就當作點擊切換開始/停止
+        // 拖曳移動；沒拖動就當作點擊切換開始/停止；長按 0.8 秒隱藏懸浮窗
         var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var moved = false
+        var downAt = 0L
         root.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY; startX = params.x; startY = params.y; moved = false
+                    downAt = System.currentTimeMillis()
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX; val dy = e.rawY - downY
@@ -290,7 +320,12 @@ class AutoService : AccessibilityService(), Actions {
                     params.x = startX + dx.toInt(); params.y = startY + dy.toInt()
                     wm.updateViewLayout(root, params)
                 }
-                MotionEvent.ACTION_UP -> if (!moved) toggle()
+                MotionEvent.ACTION_UP -> if (!moved) {
+                    if (System.currentTimeMillis() - downAt > 800) {
+                        prefs.showOverlay = false
+                        android.widget.Toast.makeText(this, "懸浮窗已隱藏，可在 App 設定中重新開啟", android.widget.Toast.LENGTH_SHORT).show()
+                    } else toggle()
+                }
             }
             true
         }
