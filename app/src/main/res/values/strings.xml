@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">NIKKE 推圖助手</string>
+    <string name="service_name">NIKKE 推圖助手</string>
+    <string name="service_desc">截取畫面辨識遊戲狀態，並模擬點擊與滑動，用於自動跳劇情與推主線章節。</string>
+</resources>
