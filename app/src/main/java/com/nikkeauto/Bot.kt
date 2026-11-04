@@ -23,6 +23,8 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var patrolStep = 0
     private var zoomedOut = false
     private var minimapTries = 0
+    private var mapFrames = 0
+    private var lastCounter: android.graphics.Rect? = null
     private var prevMapFrame: Bitmap? = null
 
     suspend fun step(bmp: Bitmap, lines: List<TextLine>) {
@@ -31,7 +33,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val screen = ScreenReader.classify(lines, bmp.height)
         if (screen != ScreenType.MAP) {
             prevMapFrame = null
+            mapFrames = 0
+            lastCounter = null
             if (lastScreen == ScreenType.MAP) resetMapState()
+        } else {
+            mapFrames++
         }
         lastScreen = screen
 
@@ -84,14 +90,29 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
 
             ScreenType.MAP -> {
                 if (!prefs.mapNav) return act.status("大地圖（尋敵已關閉）")
+                // 剛回到地圖時可能還有轉場或任務完成提示，等連續兩張都是地圖再動作
+                if (mapFrames < 2) return act.status("大地圖載入中…")
+
                 val counter = ScreenReader.minimapCounter(lines, bmp.width, bmp.height)
+                val prev = lastCounter
+                lastCounter = counter?.box
                 if (counter != null && minimapTries < 4) {
-                    minimapTries++
+                    // 計數要連續兩張出現在同一個位置，代表小地圖已經穩定
+                    val stable = prev != null &&
+                        kotlin.math.abs(prev.centerX() - counter.box.centerX()) < 15 &&
+                        kotlin.math.abs(prev.centerY() - counter.box.centerY()) < 15
+                    if (!stable) return act.status("確認小地圖位置…")
+
                     val x = Vision.minimapClosePoint(bmp, counter.box)
-                    act.status("關閉小地圖（第 $minimapTries 次）")
-                    act.tap(x.x, x.y, precise = true)
-                    act.humanDelay()
-                    return
+                    if (x != null && !onText(lines, x)) {
+                        minimapTries++
+                        act.status("關閉小地圖（第 $minimapTries 次）")
+                        act.tap(x.x, x.y, precise = true)
+                        act.humanDelay()
+                        lastCounter = null
+                        return
+                    }
+                    act.status("找不到小地圖的 X，先略過")
                 }
                 handleMap(bmp)
             }
@@ -156,6 +177,14 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         if (!prefs.patrol) return act.status("找不到目標（巡弋已關閉）")
         patrol(w, h)
     }
+
+    /** 點擊位置是否落在任何文字上（例如「完成任務」按鈕），是的話不點。 */
+    private fun onText(lines: List<TextLine>, p: Vision.Pt): Boolean =
+        lines.any { l ->
+            !l.isWord &&
+                p.x >= l.box.left - 8 && p.x <= l.box.right + 8 &&
+                p.y >= l.box.top - 8 && p.y <= l.box.bottom + 8
+        }
 
     private fun isStuck(target: Vision.Pt): Boolean {
         val last = lastTarget ?: return false

@@ -237,7 +237,7 @@ object Vision {
      * 小地圖是正方形；左上角小地圖左緣約在 3.5% 寬，放大後的地圖則置中。
      * 推算後再在附近找白色叉叉的像素，取中心點微調。
      */
-    fun minimapClosePoint(bmp: Bitmap, counter: android.graphics.Rect): Pt {
+    fun minimapClosePoint(bmp: Bitmap, counter: android.graphics.Rect): Pt? {
         val w = bmp.width.toFloat()
         val cr = counter.right.toFloat()
         val right: Float
@@ -266,7 +266,8 @@ object Vision {
                 if (hsv[1] < 0.16f && hsv[2] > 0.84f) { sx += x; sy += y; n++ }
             }
         }
-        return if (n >= 8) Pt(sx / n, sy / n) else Pt(px, py)
+        // 找不到白色叉叉就不點，避免畫面切換中點到別的東西
+        return if (n >= 8) Pt(sx / n, sy / n) else null
     }
 
     /** 兩次截圖的平均差異，用來判斷畫面是否卡住。 */
