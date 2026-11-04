@@ -203,6 +203,43 @@ object Vision {
             fy > 0.89f                                     // 返回鍵、區域切換
     }
 
+    /**
+     * 由小地圖下方「0/14」計數的位置，推算右上角 X 的位置。
+     * 小地圖是正方形；左上角小地圖左緣約在 3.5% 寬，放大後的地圖則置中。
+     * 推算後再在附近找白色叉叉的像素，取中心點微調。
+     */
+    fun minimapClosePoint(bmp: Bitmap, counter: android.graphics.Rect): Pt {
+        val w = bmp.width.toFloat()
+        val cr = counter.right.toFloat()
+        val right: Float
+        val size: Float
+        if (counter.exactCenterX() > w * 0.6f) {          // 放大的置中地圖
+            right = (cr - 0.055f * w) / 0.89f
+            size = 2 * right - w
+        } else {                                          // 左上角小地圖
+            val left = 0.035f * w
+            right = (cr - 0.055f * left) / 0.945f
+            size = right - left
+        }
+        val bottom = counter.exactCenterY() + 0.11f * size
+        val top = bottom - size
+        val px = right - 0.11f * size
+        val py = top + 0.09f * size
+
+        val r = (0.07f * size).toInt().coerceAtLeast(6)
+        val hsv = FloatArray(3)
+        var sx = 0f; var sy = 0f; var n = 0
+        for (y in (py.toInt() - r)..(py.toInt() + r)) {
+            if (y !in 0 until bmp.height) continue
+            for (x in (px.toInt() - r)..(px.toInt() + r)) {
+                if (x !in 0 until bmp.width) continue
+                android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
+                if (hsv[1] < 0.16f && hsv[2] > 0.84f) { sx += x; sy += y; n++ }
+            }
+        }
+        return if (n >= 8) Pt(sx / n, sy / n) else Pt(px, py)
+    }
+
     /** 兩次截圖的平均差異，用來判斷畫面是否卡住。 */
     fun diff(a: Bitmap, b: Bitmap): Float {
         if (a.width != b.width || a.height != b.height) return 1f

@@ -5,7 +5,8 @@ import kotlin.math.hypot
 
 /** 機器人對外需要的動作，由 AutoService 實作。座標都是 720 寬的縮小畫面座標。 */
 interface Actions {
-    suspend fun tap(x: Float, y: Float)
+    /** precise = true 時不加隨機偏移（小按鈕用）。 */
+    suspend fun tap(x: Float, y: Float, precise: Boolean = false)
     suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long = 400)
     suspend fun pinchOut(cx: Float, cy: Float)
     suspend fun humanDelay()
@@ -21,6 +22,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var sameTargetCount = 0
     private var patrolStep = 0
     private var zoomedOut = false
+    private var minimapTries = 0
     private var prevMapFrame: Bitmap? = null
 
     suspend fun step(bmp: Bitmap, lines: List<TextLine>) {
@@ -83,10 +85,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             ScreenType.MAP -> {
                 if (!prefs.mapNav) return act.status("大地圖（尋敵已關閉）")
                 val counter = ScreenReader.minimapCounter(lines, bmp.width, bmp.height)
-                if (counter != null) {
-                    act.status("關閉小地圖")
-                    // X 在小地圖右上角，約在畫面 (36%, 13%) 的位置
-                    act.tap(w * 0.36f, h * 0.13f)
+                if (counter != null && minimapTries < 4) {
+                    minimapTries++
+                    val x = Vision.minimapClosePoint(bmp, counter.box)
+                    act.status("關閉小地圖（第 $minimapTries 次）")
+                    act.tap(x.x, x.y, precise = true)
                     act.humanDelay()
                     return
                 }
@@ -199,5 +202,6 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         sameTargetCount = 0
         patrolStep = 0
         zoomedOut = false
+        minimapTries = 0
     }
 }

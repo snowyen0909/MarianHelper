@@ -149,8 +149,10 @@ class AutoService : AccessibilityService(), Actions {
 
     private fun jitter() = Random.nextFloat() * 8f - 4f
 
-    override suspend fun tap(x: Float, y: Float) {
-        val path = Path().apply { moveTo((x + jitter()) * scale, (y + jitter()) * scale) }
+    override suspend fun tap(x: Float, y: Float, precise: Boolean) {
+        val jx = if (precise) 0f else jitter()
+        val jy = if (precise) 0f else jitter()
+        val path = Path().apply { moveTo((x + jx) * scale, (y + jy) * scale) }
         gesture(GestureDescription.StrokeDescription(path, 0, Random.nextLong(40, 90)))
     }
 

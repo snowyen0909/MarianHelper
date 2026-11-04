@@ -51,10 +51,10 @@ class ScreenReader {
         /** 左上小地圖下方的「0/14」計數，有它代表小地圖開著。 */
         fun minimapCounter(lines: List<TextLine>, w: Int, h: Int): TextLine? {
             val re = Regex("""\d{1,3}/\d{1,3}$""")
+            // 小地圖在左上，放大後會跑到畫面中央，所以只排除頂部資源列與底部按鈕
             return lines.firstOrNull { l ->
                 re.containsMatchIn(l.norm) &&
-                    l.box.exactCenterX() < w * 0.45f &&
-                    l.box.exactCenterY() in (h * 0.18f)..(h * 0.33f)
+                    l.box.exactCenterY() in (h * 0.12f)..(h * 0.88f)
             }
         }
 
