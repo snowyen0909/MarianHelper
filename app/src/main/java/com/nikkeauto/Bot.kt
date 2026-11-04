@@ -9,6 +9,8 @@ interface Actions {
     suspend fun tap(x: Float, y: Float, precise: Boolean = false)
     suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long = 400)
     suspend fun pinchOut(cx: Float, cy: Float)
+    /** Android 返回鍵，用來關閉誤開的視窗。 */
+    suspend fun back()
     suspend fun humanDelay()
     fun status(text: String)
     fun stopWithAlert(title: String, body: String)
@@ -28,6 +30,9 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var lastScene = ScreenType.MAP
     private var sceneTries = 0
     private var questTaps = 0
+    private var missionTries = 0
+    /** 上一個動作是不是點任務箭頭。 */
+    private var lastQuestTap = false
     private var lastCounter: android.graphics.Rect? = null
     private var prevMapFrame: Bitmap? = null
 
@@ -35,6 +40,9 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
         val screen = ScreenReader.classify(lines, bmp.width, bmp.height)
+        val questTapBefore = lastQuestTap
+        lastQuestTap = false
+        if (screen != ScreenType.MISSION) missionTries = 0
         if (screen == ScreenType.MAP || screen == ScreenType.OUTPOST || screen == ScreenType.ARK) {
             if (screen != lastScene) { sceneTries = 0; questTaps = 0 }
             lastScene = screen
@@ -104,12 +112,25 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             }
 
             ScreenType.MISSION -> {
-                // 誤開了任務視窗（MISSION），點視窗右上角的 X
-                val title = ScreenReader.find(lines, "MISSION")!!
-                val guess = Vision.Pt(w * 0.91f, title.box.exactCenterY() - h * 0.035f)
-                val x = Vision.whiteCenter(bmp, guess.x, guess.y, (w * 0.05f).toInt()) ?: guess
-                act.status("關閉任務視窗")
-                act.tap(x.x, x.y, precise = true)
+                // 誤開了任務視窗：可能是剛剛點任務箭頭點偏了，這個場景先停用箭頭
+                if (questTapBefore) questTaps = 99
+                missionTries++
+                if (missionTries > 6) {
+                    act.stopWithAlert("關不掉任務視窗", "已停止，請手動關閉 MISSION 視窗後再開始。")
+                    return
+                }
+                if (missionTries % 2 == 1) {
+                    act.status("關閉任務視窗（返回鍵）")
+                    act.back()
+                } else {
+                    // 用最上面那個 MISSION（標題），不是下面的 MAIN／DAILY MISSION
+                    val title = lines.filter { !it.isWord && it.norm.contains("MISSION") }
+                        .minByOrNull { it.box.top }!!
+                    val guess = Vision.Pt(w * 0.91f, title.box.exactCenterY() - h * 0.035f)
+                    val x = Vision.whiteCenter(bmp, guess.x, guess.y, (w * 0.05f).toInt()) ?: guess
+                    act.status("關閉任務視窗（點 X）")
+                    act.tap(x.x, x.y, precise = true)
+                }
                 act.humanDelay()
             }
 
@@ -255,12 +276,17 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val w = bmp.width
         val cy = quest.box.centerY()
         val r = quest.box.height()
-        val p = Vision.colorCenter(bmp, (w * 0.82f).toInt(), cy - r, w - 1, cy + r,
+        // 只在真的找到藍色箭頭時才點，不用猜的位置，避免點到任務文字打開 MISSION 視窗
+        val p = Vision.colorCenter(bmp, (w * 0.85f).toInt(), cy - r, w - 1, cy + r,
             190f, 225f, 0.55f, 0.6f, 25)
-            ?: Vision.Pt(w * 0.95f, cy.toFloat())
         questTaps++
+        if (p == null || p.x < quest.box.right) {
+            act.status("找不到任務箭頭")
+            return false
+        }
         act.status("任務：${quest.text} → 點藍色箭頭")
-        act.tap(p.x, p.y)
+        act.tap(p.x, p.y, precise = true)
+        lastQuestTap = true
         act.humanDelay()
         return true
     }

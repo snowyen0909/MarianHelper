@@ -170,6 +170,10 @@ class AutoService : AccessibilityService(), Actions {
         gesture(GestureDescription.StrokeDescription(path, 0, Random.nextLong(40, 90)))
     }
 
+    override suspend fun back() {
+        performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
     override suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long) {
         val path = Path().apply {
             moveTo(x1 * scale, y1 * scale)
