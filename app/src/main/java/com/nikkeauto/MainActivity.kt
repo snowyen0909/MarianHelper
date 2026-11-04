@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -87,6 +89,14 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
     val connected by AutoService.connected.collectAsState()
     val running by AutoService.running.collectAsState()
     val status by AutoService.lastStatus.collectAsState()
+    var overlayOn by remember { mutableStateOf(prefs.showOverlay) }
+    DisposableEffect(Unit) {
+        val l = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            overlayOn = prefs.showOverlay
+        }
+        prefs.listen(l)
+        onDispose { prefs.unlisten(l) }
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text("NIKKE 推圖助手") }) }) { pad ->
         Column(
@@ -127,6 +137,25 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                             FilledTonalButton(onClick = openA11y) { Text("無障礙設定") }
                         }
                     }
+                    if (connected) {
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (overlayOn) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                null,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("懸浮窗", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    if (overlayOn) "顯示中（長按懸浮窗 1 秒可隱藏）"
+                                    else "已隱藏，打開這裡或用快速設定面板重新顯示",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Switch(checked = overlayOn, onCheckedChange = { prefs.showOverlay = it })
+                        }
+                    }
                 }
             }
 
@@ -162,9 +191,12 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp),
                 )
-                ToggleRow(Icons.Filled.Visibility, "顯示懸浮窗", "也可以長按懸浮窗 1 秒來隱藏",
-                    prefs.showOverlay) { prefs.showOverlay = it }
-                HorizontalDivider()
+                Text(
+                    "下拉通知欄的快速設定面板也能加入「NIKKE 懸浮窗」開關，遊戲中隨時切換。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
                 ToggleRow(Icons.Filled.SportsEsports, "只在遊戲中顯示", "離開妮姬時自動隱藏並停止腳本",
                     prefs.overlayOnlyInGame) { prefs.overlayOnlyInGame = it }
             }

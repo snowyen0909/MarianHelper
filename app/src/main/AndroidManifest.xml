@@ -30,5 +30,15 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
         </service>
+        <service
+            android:name=".OverlayTileService"
+            android:exported="true"
+            android:icon="@android:drawable/ic_menu_view"
+            android:label="NIKKE 懸浮窗"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
