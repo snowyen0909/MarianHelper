@@ -270,6 +270,39 @@ object Vision {
         return if (n >= 8) Pt(sx / n, sy / n) else null
     }
 
+    /** 在指定範圍內找符合顏色的像素，回傳中心點；數量不足回傳 null。 */
+    fun colorCenter(
+        bmp: Bitmap, x0: Int, y0: Int, x1: Int, y1: Int,
+        hueMin: Float, hueMax: Float, sMin: Float, vMin: Float, minCount: Int,
+    ): Pt? {
+        val hsv = FloatArray(3)
+        var sx = 0f; var sy = 0f; var n = 0
+        for (y in y0.coerceAtLeast(0)..y1.coerceAtMost(bmp.height - 1)) {
+            for (x in x0.coerceAtLeast(0)..x1.coerceAtMost(bmp.width - 1)) {
+                android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
+                if (hsv[0] in hueMin..hueMax && hsv[1] >= sMin && hsv[2] >= vMin) {
+                    sx += x; sy += y; n++
+                }
+            }
+        }
+        return if (n >= minCount) Pt(sx / n, sy / n) else null
+    }
+
+    /** 白色叉叉（X 按鈕）的中心。 */
+    fun whiteCenter(bmp: Bitmap, cx: Float, cy: Float, r: Int): Pt? {
+        val hsv = FloatArray(3)
+        var sx = 0f; var sy = 0f; var n = 0
+        for (y in (cy.toInt() - r)..(cy.toInt() + r)) {
+            if (y !in 0 until bmp.height) continue
+            for (x in (cx.toInt() - r)..(cx.toInt() + r)) {
+                if (x !in 0 until bmp.width) continue
+                android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
+                if (hsv[1] < 0.16f && hsv[2] > 0.84f) { sx += x; sy += y; n++ }
+            }
+        }
+        return if (n >= 8) Pt(sx / n, sy / n) else null
+    }
+
     /** 兩次截圖的平均差異，用來判斷畫面是否卡住。 */
     fun diff(a: Bitmap, b: Bitmap): Float {
         if (a.width != b.width || a.height != b.height) return 1f

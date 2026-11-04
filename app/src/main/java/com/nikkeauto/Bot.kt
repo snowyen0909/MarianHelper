@@ -24,13 +24,23 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var zoomedOut = false
     private var minimapTries = 0
     private var mapFrames = 0
+    /** 最近一次看到的場景（野外／前哨基地／方舟），劇情與讀取畫面不會改變它。 */
+    private var lastScene = ScreenType.MAP
+    private var sceneTries = 0
+    private var questTaps = 0
     private var lastCounter: android.graphics.Rect? = null
     private var prevMapFrame: Bitmap? = null
 
     suspend fun step(bmp: Bitmap, lines: List<TextLine>) {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
-        val screen = ScreenReader.classify(lines, bmp.height)
+        val screen = ScreenReader.classify(lines, bmp.width, bmp.height)
+        if (screen == ScreenType.MAP || screen == ScreenType.OUTPOST || screen == ScreenType.ARK) {
+            if (screen != lastScene) { sceneTries = 0; questTaps = 0 }
+            lastScene = screen
+        } else if (screen != lastScreen) {
+            sceneTries = 0
+        }
         if (screen != ScreenType.MAP) {
             prevMapFrame = null
             mapFrames = 0
@@ -74,8 +84,29 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 act.humanDelay()
             }
 
+            ScreenType.CHAPTER_LIST -> {
+                // 打完 Boss 會跳出章節清單，點右上角 X 關掉
+                val title = ScreenReader.find(lines, "CHAPTERLIST")!!
+                val guess = Vision.Pt(w * 0.9f, title.box.exactCenterY())
+                val x = Vision.whiteCenter(bmp, guess.x, guess.y, (w * 0.06f).toInt()) ?: guess
+                act.status("關閉章節清單")
+                if (!onText(lines, x)) act.tap(x.x, x.y, precise = true)
+                act.humanDelay()
+            }
+
+            ScreenType.ENTER_PANEL -> {
+                val enter = lines.first { ScreenReader.isEnterButton(it) }
+                act.status("設施面板 → 進入")
+                act.tap(enter.box.exactCenterX(), enter.box.exactCenterY())
+                act.humanDelay()
+            }
+
+            ScreenType.OUTPOST -> handleOutpost(bmp, lines)
+            ScreenType.ARK -> handleArk(bmp, lines)
+
             ScreenType.PREPARE -> {
                 if (!prefs.prepAuto) return act.status("出擊準備（自動點擊已關閉）")
+                if (lastScene != ScreenType.MAP) return act.status("不在野外，不自動戰鬥")
                 val quick = ScreenReader.find(lines, "快速戰鬥", "快速战斗")
                 if (quick != null && ScreenReader.isOrangeButton(bmp, quick.box)) {
                     act.status("出擊準備 → 快速戰鬥")
@@ -113,6 +144,12 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                         return
                     }
                     act.status("找不到小地圖的 X，先略過")
+                }
+
+                // 任務要求前往其他場景（方舟、前哨基地）時，點任務欄的藍色箭頭
+                val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
+                if (quest != null && quest.norm.contains("前往") && questTaps < 3) {
+                    if (tapQuestArrow(bmp, quest)) return
                 }
                 handleMap(bmp)
             }
@@ -176,6 +213,70 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         // 5. 探路
         if (!prefs.patrol) return act.status("找不到目標（巡弋已關閉）")
         patrol(w, h)
+    }
+
+    /** 點任務欄右邊的藍色圓形箭頭。 */
+    private suspend fun tapQuestArrow(bmp: Bitmap, quest: TextLine): Boolean {
+        val w = bmp.width
+        val cy = quest.box.centerY()
+        val r = quest.box.height()
+        val p = Vision.colorCenter(bmp, (w * 0.82f).toInt(), cy - r, w - 1, cy + r,
+            190f, 225f, 0.55f, 0.6f, 25)
+            ?: Vision.Pt(w * 0.95f, cy.toFloat())
+        questTaps++
+        act.status("任務：${quest.text} → 點藍色箭頭")
+        act.tap(p.x, p.y)
+        act.humanDelay()
+        return true
+    }
+
+    /** 前哨基地：點箭頭讓鏡頭對準目標 → 點畫面中央的指揮中心 → 面板出現後由 ENTER_PANEL 點「進入」。 */
+    private suspend fun handleOutpost(bmp: Bitmap, lines: List<TextLine>) {
+        val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
+        val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
+        when (sceneTries % 3) {
+            0 -> if (quest != null) tapQuestArrow(bmp, quest) else act.status("前哨基地：沒有任務")
+            1 -> {
+                act.status("前哨基地 → 點中央指揮中心")
+                act.tap(w * 0.5f, h * 0.45f)
+                act.humanDelay()
+            }
+            else -> act.status("前哨基地：等待面板…")
+        }
+        sceneTries++
+    }
+
+    /** 方舟：照任務欄的名稱找設施，找不到就點中間亮藍色的設施。 */
+    private suspend fun handleArk(bmp: Bitmap, lines: List<TextLine>) {
+        val w = bmp.width; val h = bmp.height
+        val quest = ScreenReader.questLine(lines, w, h)
+        val target = quest?.let { ScreenReader.questTarget(it) }
+        sceneTries++
+        if (sceneTries > 6) return act.status("方舟：找不到目標，請手動處理")
+
+        if (target != null) {
+            val key = target.replace(" ", "")
+            val hit = lines.firstOrNull { l ->
+                !l.isWord && l !== quest &&
+                    l.box.exactCenterY() in (h * 0.12f)..(h * 0.9f) &&
+                    (l.norm.contains(key) || key.contains(l.norm) && l.norm.length >= 2)
+            }
+            if (hit != null) {
+                act.status("方舟 → 點「${hit.text}」")
+                act.tap(hit.box.exactCenterX(), hit.box.exactCenterY())
+                act.humanDelay()
+                return
+            }
+        }
+        val glow = Vision.colorCenter(bmp, (w * 0.15f).toInt(), (h * 0.3f).toInt(),
+            (w * 0.85f).toInt(), (h * 0.7f).toInt(), 175f, 205f, 0.5f, 0.75f, 150)
+        if (glow != null) {
+            act.status("方舟 → 點中間亮藍色設施")
+            act.tap(glow.x, glow.y)
+            act.humanDelay()
+            return
+        }
+        if (quest != null) tapQuestArrow(bmp, quest) else act.status("方舟：沒有任務")
     }
 
     /** 點擊位置是否落在任何文字上（例如「完成任務」按鈕），是的話不點。 */

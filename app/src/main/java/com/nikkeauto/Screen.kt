@@ -13,9 +13,13 @@ enum class ScreenType(val label: String) {
     FAILED("戰鬥失敗"),
     STORY("劇情"),
     DIALOG_LOG("對話紀錄"),
+    CHAPTER_LIST("章節清單"),
     TAP_ANY("結算/解鎖"),
     PREPARE("出擊準備"),
-    MAP("大地圖"),
+    ENTER_PANEL("設施面板"),
+    MAP("野外"),
+    OUTPOST("前哨基地"),
+    ARK("方舟"),
     UNKNOWN("戰鬥中/讀取中"),
 }
 
@@ -58,15 +62,49 @@ class ScreenReader {
             }
         }
 
-        fun classify(lines: List<TextLine>, height: Int): ScreenType {
+        /** 左上角的場景標籤：野外／前哨基地／方舟。只看左上角，避免讀到任務欄裡的「前往【前哨基地】」。 */
+        fun scene(lines: List<TextLine>, w: Int, h: Int): ScreenType? {
+            val tl = lines.filter { it.box.exactCenterX() < w * 0.3f && it.box.exactCenterY() < h * 0.06f }
+            return when {
+                tl.any { it.norm.startsWith("野外") } -> ScreenType.MAP
+                tl.any { it.norm.startsWith("前哨基地") } -> ScreenType.OUTPOST
+                tl.any { it.norm.startsWith("方舟") } -> ScreenType.ARK
+                else -> null
+            }
+        }
+
+        /** 上方任務欄的文字，例如「通關【17-30】」或「前往【方舟】的【米西利斯總部】」。 */
+        fun questLine(lines: List<TextLine>, w: Int, h: Int): TextLine? =
+            lines.firstOrNull { l ->
+                !l.isWord && l.box.exactCenterY() < h * 0.12f && l.box.exactCenterX() > w * 0.25f &&
+                    (l.norm.contains("前往") || l.norm.contains("通關") || l.norm.contains("通关"))
+            }
+
+        /** 任務要前往的目標名稱：取最後一組【】裡的文字。 */
+        fun questTarget(quest: TextLine): String? {
+            val names = Regex("""[【\[]([^】\]]+)[】\]]""").findAll(quest.text).map { it.groupValues[1].trim() }.toList()
+            return names.lastOrNull()?.takeIf { it.length >= 2 }
+        }
+
+        /** 「進入」按鈕（前面可能被讀成打勾符號）。 */
+        fun isEnterButton(l: TextLine): Boolean =
+            !l.isWord && l.norm.length <= 3 && (l.norm.endsWith("進入") || l.norm.endsWith("进入"))
+
+        fun classify(lines: List<TextLine>, width: Int, height: Int): ScreenType {
             if (find(lines, "FAILED", "重新挑戰", "重新挑战") != null) return ScreenType.FAILED
             val dialog = find(lines, "DIALOGUE")
             if (dialog != null && dialog.box.centerY() < height * 0.12f) return ScreenType.DIALOG_LOG
             val skip = findWord(lines, "SKIP")
             if (skip != null && skip.box.centerY() < height * 0.12f) return ScreenType.STORY
+            if (find(lines, "CHAPTERLIST") != null) return ScreenType.CHAPTER_LIST
             if (find(lines, "點擊任意", "点击任意", "點擊繼續", "点击继续") != null) return ScreenType.TAP_ANY
             if (find(lines, "進入戰鬥", "进入战斗") != null) return ScreenType.PREPARE
-            if (find(lines, "CURRENTAREA", "野外") != null) return ScreenType.MAP
+            // 設施面板：下方有「關閉」和「進入」兩顆按鈕
+            if (lines.any { isEnterButton(it) } &&
+                lines.any { it.norm.contains("關閉") || it.norm.contains("关闭") }
+            ) return ScreenType.ENTER_PANEL
+            scene(lines, width, height)?.let { return it }
+            if (find(lines, "CURRENTAREA") != null) return ScreenType.MAP
             return ScreenType.UNKNOWN
         }
 
