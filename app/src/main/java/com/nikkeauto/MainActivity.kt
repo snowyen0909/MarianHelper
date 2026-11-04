@@ -192,13 +192,11 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp),
                 )
                 Text(
-                    "下拉通知欄的快速設定面板也能加入「NIKKE 懸浮窗」開關，遊戲中隨時切換。",
+                    "HUD 會一直顯示，切到其他 App 也在；離開遊戲時腳本會自動停止。要關掉 HUD：點面板右上角 X、長按圓鈕，或用首頁開關。下拉通知欄的快速設定面板也能加入「NIKKE 懸浮窗」開關。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
-                ToggleRow(Icons.Filled.SportsEsports, "只在遊戲中顯示", "離開妮姬時自動隱藏並停止腳本",
-                    prefs.overlayOnlyInGame) { prefs.overlayOnlyInGame = it }
             }
 
             // 延遲

@@ -85,11 +85,11 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     /** 目前前景的 App 是不是妮姬（或本 App 自己）。 */
     @Volatile private var inGame = true
 
+    /** HUD 一直顯示，只有使用者自己關掉（長按圓鈕、面板的 X、App 或快速設定）才隱藏。 */
     private fun updateOverlayVisibility() {
-        val show = prefs.showOverlay && (!prefs.overlayOnlyInGame || inGame)
+        val show = prefs.showOverlay
         overlay?.visibility = if (show) View.VISIBLE else View.GONE
-        // 懸浮窗被隱藏時，順便停止腳本，避免在其他 App 上亂點
-        if (!show && running.value) stopBot()
+        if (!show) hudExpanded = false
     }
 
     override fun onDestroy() {
@@ -112,7 +112,11 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
         val now = pkg.contains("nikke", ignoreCase = true)
         if (now != inGame) {
             inGame = now
-            main.post { updateOverlayVisibility() }
+            // HUD 照樣顯示，但離開遊戲時停止腳本，避免在其他 App 上亂點
+            if (!now && running.value) main.post {
+                stopBot()
+                status("已離開遊戲，腳本已停止")
+            }
         }
     }
     override fun onInterrupt() {}

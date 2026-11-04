@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.PlayArrow
@@ -220,6 +222,10 @@ private fun HudPanel(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         )
                     }
+                    // 關閉 HUD
+                    IconButton(onClick = { cb.hide() }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = "關閉 HUD")
+                    }
                 }
 
                 // 目前動作
@@ -263,11 +269,6 @@ private fun HudPanel(
                     }
                 }
 
-                TextButton(onClick = { cb.hide() }, modifier = Modifier.align(Alignment.End)) {
-                    Icon(Icons.Filled.VisibilityOff, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("隱藏 HUD")
-                }
             }
         }
     }
