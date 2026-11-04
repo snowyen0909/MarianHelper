@@ -13,6 +13,7 @@ enum class ScreenType(val label: String) {
     FAILED("戰鬥失敗"),
     STORY("劇情"),
     DIALOG_LOG("對話紀錄"),
+    CONFIRM_SKIP("確認跳過"),
     CHAPTER_LIST("章節清單"),
     MISSION("任務視窗"),
     TAP_ANY("結算/解鎖"),
@@ -81,6 +82,17 @@ class ScreenReader {
                     (l.norm.contains("前往") || l.norm.contains("通關") || l.norm.contains("通关"))
             }
 
+        /** 任務「通關【7-1】」的章節數字 7。 */
+        fun questChapter(quest: TextLine): Int? =
+            Regex("""(\d{1,2})-\d{1,2}""").find(quest.norm)?.groupValues?.get(1)?.toIntOrNull()
+
+        /** 右下角「CURRENT AREA」的大數字（目前所在區域）。左右兩邊較小的是上一區、下一區。 */
+        fun currentArea(lines: List<TextLine>, w: Int, h: Int): Int? =
+            lines.filter { l ->
+                l.box.exactCenterX() > w * 0.5f && l.box.exactCenterY() > h * 0.85f &&
+                    Regex("""^\d{1,2}$""").matches(l.norm)
+            }.maxByOrNull { it.box.height() }?.norm?.toIntOrNull()
+
         /** 任務要前往的目標名稱：取最後一組【】裡的文字。 */
         fun questTarget(quest: TextLine): String? {
             val names = Regex("""[【\[]([^】\]]+)[】\]]""").findAll(quest.text).map { it.groupValues[1].trim() }.toList()
@@ -109,12 +121,15 @@ class ScreenReader {
             if (find(lines, "FAILED", "重新挑戰", "重新挑战") != null) return ScreenType.FAILED
             val dialog = find(lines, "DIALOGUE")
             if (dialog != null && dialog.box.centerY() < height * 0.12f) return ScreenType.DIALOG_LOG
+            if (find(lines, "是否跳過", "是否跳过") != null) return ScreenType.CONFIRM_SKIP
             val skip = findWord(lines, "SKIP")
             if (skip != null && skip.box.centerY() < height * 0.12f) return ScreenType.STORY
             if (find(lines, "CHAPTERLIST") != null) return ScreenType.CHAPTER_LIST
             val mission = find(lines, "MISSION")
             if (mission != null && mission.box.centerY() < height * 0.35f) return ScreenType.MISSION
-            if (find(lines, "點擊任意", "点击任意", "點擊繼續", "点击继续") != null) return ScreenType.TAP_ANY
+            if (find(lines, "點擊任意", "点击任意", "點擊繼續", "点击继续", "點擊將開啟", "点击将开启",
+                    "下一章節", "下一章节", "MISSIONCLEAR") != null
+            ) return ScreenType.TAP_ANY
             if (isPrepare(lines)) return ScreenType.PREPARE
             // 設施面板：下方有「關閉」和「進入」兩顆按鈕
             if (lines.any { isEnterButton(it) } &&

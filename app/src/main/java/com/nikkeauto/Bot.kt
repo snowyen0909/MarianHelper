@@ -84,6 +84,15 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 act.humanDelay()
             }
 
+            ScreenType.CONFIRM_SKIP -> {
+                // 「是否跳過進行中的教學指南？」→ 按確認
+                val ok = ScreenReader.find(lines, "確認", "确认")
+                act.status("確認跳過")
+                if (ok != null) act.tap(ok.box.exactCenterX(), ok.box.exactCenterY())
+                else act.tap(w * 0.7f, h * 0.6f)
+                act.humanDelay()
+            }
+
             ScreenType.CHAPTER_LIST -> {
                 // 打完 Boss 會跳出章節清單，點右上角 X 關掉
                 val title = ScreenReader.find(lines, "CHAPTERLIST")!!
@@ -165,6 +174,13 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
                 if (quest != null && quest.norm.contains("前往") && questTaps < 3) {
                     if (tapQuestArrow(bmp, quest)) return
+                }
+                // 任務「通關【7-1】」但目前在 06 區 → 點箭頭前往下一區
+                val questCh = quest?.let { ScreenReader.questChapter(it) }
+                val area = ScreenReader.currentArea(lines, bmp.width, bmp.height)
+                if (questCh != null && area != null && questCh != area && questTaps < 3) {
+                    act.status("任務在 $questCh 區，目前在 $area 區")
+                    if (tapQuestArrow(bmp, quest!!)) return
                 }
                 handleMap(bmp, lines, counter)
             }
