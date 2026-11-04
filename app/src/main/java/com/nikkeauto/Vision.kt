@@ -199,7 +199,7 @@ object Vision {
         val fx = bl.cx / w
         val fy = bl.cy / h
         return fy < 0.15f ||                              // 資源列、任務列
-            (fx < 0.42f && fy < 0.285f) ||                // 左上小地圖
+            (fx < 0.42f && fy < 0.20f) ||                 // 左上「野外」標籤一帶（小地圖會先被關掉）
             fy > 0.89f                                     // 返回鍵、區域切換
     }
 

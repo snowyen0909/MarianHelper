@@ -44,9 +44,18 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
 
             ScreenType.STORY -> {
                 if (!prefs.skipStory) return act.status("劇情（跳過已關閉）")
-                val skip = ScreenReader.find(lines, "SKIP")!!
+                val skip = ScreenReader.findWord(lines, "SKIP")!!
                 act.status("劇情 → 點 SKIP")
-                act.tap(skip.box.exactCenterX(), skip.box.exactCenterY())
+                // SKIP 文字左邊有 ▶▶ 圖示，點文字中心略偏左
+                act.tap(skip.box.exactCenterX() - skip.box.width() * 0.15f, skip.box.exactCenterY())
+                act.humanDelay()
+            }
+
+            ScreenType.DIALOG_LOG -> {
+                // 誤開了對話紀錄，點右上角 X 關掉
+                val dialog = ScreenReader.find(lines, "DIALOGUE")!!
+                act.status("關閉對話紀錄")
+                act.tap(w * 0.94f, dialog.box.exactCenterY())
                 act.humanDelay()
             }
 
@@ -73,6 +82,14 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
 
             ScreenType.MAP -> {
                 if (!prefs.mapNav) return act.status("大地圖（尋敵已關閉）")
+                val counter = ScreenReader.minimapCounter(lines, bmp.width, bmp.height)
+                if (counter != null) {
+                    act.status("關閉小地圖")
+                    // X 在小地圖右上角，約在畫面 (36%, 13%) 的位置
+                    act.tap(w * 0.36f, h * 0.13f)
+                    act.humanDelay()
+                    return
+                }
                 handleMap(bmp)
             }
 
