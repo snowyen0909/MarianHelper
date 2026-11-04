@@ -117,14 +117,19 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             ScreenType.PREPARE -> {
                 if (!prefs.prepAuto) return act.status("出擊準備（自動點擊已關閉）")
                 if (lastScene != ScreenType.MAP) return act.status("不在野外，不自動戰鬥")
-                val quick = ScreenReader.find(lines, "快速戰鬥", "快速战斗")
+                val quick = ScreenReader.quickBattle(lines)
                 if (quick != null && ScreenReader.isOrangeButton(bmp, quick.box)) {
                     act.status("出擊準備 → 快速戰鬥")
                     act.tap(quick.box.exactCenterX(), quick.box.exactCenterY())
                 } else {
-                    val enter = ScreenReader.find(lines, "進入戰鬥", "进入战斗")!!
+                    val enter = ScreenReader.enterBattle(lines)
+                    // 讀不到按鈕文字時，找右下角的藍色按鈕
+                    val p = enter?.let { Vision.Pt(it.box.exactCenterX(), it.box.exactCenterY()) }
+                        ?: Vision.colorCenter(bmp, (w * 0.5f).toInt(), (h * 0.88f).toInt(),
+                            (w - 1).toInt(), (h - 1).toInt(), 195f, 225f, 0.55f, 0.55f, 200)
+                    if (p == null) return act.status("出擊準備：找不到進入戰鬥按鈕")
                     act.status("出擊準備 → 進入戰鬥")
-                    act.tap(enter.box.exactCenterX(), enter.box.exactCenterY())
+                    act.tap(p.x, p.y)
                 }
                 act.humanDelay()
             }

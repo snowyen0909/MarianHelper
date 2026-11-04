@@ -87,6 +87,20 @@ class ScreenReader {
             return names.lastOrNull()?.takeIf { it.length >= 2 }
         }
 
+        // 按鈕字體特殊，「戰鬥」常被讀成「戰門」等，所以只比對前兩三個字，並搭配面板上的其他文字
+        private val ENTER_BATTLE = arrayOf("進入戰", "进入战", "進入战", "进入戰")
+        private val QUICK_BATTLE = arrayOf("快速戰", "快速战")
+        private val PREPARE_HINTS = arrayOf(
+            "戰場資訊", "战场资讯", "战场資訊", "獎勵資訊", "奖励资讯",
+            "WEAKPOINT", "EFFECTIVERANGE", "基準戰鬥力", "我的戰鬥力", "殲滅戰", "歼灭战",
+        )
+
+        fun isPrepare(lines: List<TextLine>): Boolean =
+            find(lines, *ENTER_BATTLE) != null || lines.count { l -> PREPARE_HINTS.any { l.norm.contains(it) } } >= 2
+
+        fun enterBattle(lines: List<TextLine>): TextLine? = find(lines, *ENTER_BATTLE)
+        fun quickBattle(lines: List<TextLine>): TextLine? = find(lines, *QUICK_BATTLE)
+
         /** 「進入」按鈕（前面可能被讀成打勾符號）。 */
         fun isEnterButton(l: TextLine): Boolean =
             !l.isWord && l.norm.length <= 3 && (l.norm.endsWith("進入") || l.norm.endsWith("进入"))
@@ -101,7 +115,7 @@ class ScreenReader {
             val mission = find(lines, "MISSION")
             if (mission != null && mission.box.centerY() < height * 0.35f) return ScreenType.MISSION
             if (find(lines, "點擊任意", "点击任意", "點擊繼續", "点击继续") != null) return ScreenType.TAP_ANY
-            if (find(lines, "進入戰鬥", "进入战斗") != null) return ScreenType.PREPARE
+            if (isPrepare(lines)) return ScreenType.PREPARE
             // 設施面板：下方有「關閉」和「進入」兩顆按鈕
             if (lines.any { isEnterButton(it) } &&
                 lines.any { it.norm.contains("關閉") || it.norm.contains("关闭") }
