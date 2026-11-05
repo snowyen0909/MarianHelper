@@ -12,8 +12,8 @@ android {
         applicationId = "com.nikkeauto"
         minSdk = 30          // takeScreenshot() 需要 Android 11 以上
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 100
+        versionName = "1.0.0"
     }
 
     buildTypes {
@@ -30,6 +30,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

@@ -25,7 +25,7 @@ class OverlayTileService : TileService() {
             prefs.showOverlay -> Tile.STATE_ACTIVE
             else -> Tile.STATE_INACTIVE
         }
-        tile.label = "NIKKE 懸浮窗"
+        tile.label = getString(R.string.tile_name)
         tile.subtitle = when {
             !serviceOn -> "服務未啟用"
             prefs.showOverlay -> "顯示中"

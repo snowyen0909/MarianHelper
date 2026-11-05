@@ -9,7 +9,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -98,7 +104,7 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
         onDispose { prefs.unlisten(l) }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("NIKKE 推圖助手") }) }) { pad ->
+    Scaffold(topBar = { TopAppBar(title = { Text("瑪麗安助手") }) }) { pad ->
         Column(
             Modifier
                 .fillMaxSize()
@@ -107,6 +113,41 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // 封面
+            Card(shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth()) {
+                Image(
+                    painter = painterResource(R.drawable.marian_cover),
+                    contentDescription = "瑪麗安助手 MarianHelper",
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1.6f),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("瑪麗安助手", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "MarianHelper · 妮姬主線推圖",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ) {
+                        Text(
+                            "v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+
             // 服務狀態
             Card(
                 colors = CardDefaults.cardColors(
@@ -122,7 +163,7 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     )
                     Text(
                         if (connected) "目前狀態：$status"
-                        else "請到「無障礙」設定中開啟「NIKKE 推圖助手」。",
+                        else "請到「無障礙」設定中開啟「瑪麗安助手 MarianHelper」。",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -192,7 +233,7 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp),
                 )
                 Text(
-                    "HUD 會一直顯示，切到其他 App 也在；離開遊戲時腳本會自動停止。要關掉 HUD：點面板右上角 X、長按圓鈕，或用首頁開關。下拉通知欄的快速設定面板也能加入「NIKKE 懸浮窗」開關。",
+                    "HUD 會一直顯示，切到其他 App 也在；離開遊戲時腳本會自動停止。要關掉 HUD：點面板右上角 X、長按圓鈕，或用首頁開關。下拉通知欄的快速設定面板也能加入「瑪麗安 HUD」開關。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

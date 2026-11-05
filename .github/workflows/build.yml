@@ -22,7 +22,14 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
+      - name: Rename APK
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk "out/MarianHelper-v${VER}.apk"
+          echo "VER=${VER}" >> "$GITHUB_ENV"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: NikkeAuto-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: MarianHelper-v${{ env.VER }}
+          path: out/*.apk

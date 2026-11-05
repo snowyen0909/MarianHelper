@@ -7,6 +7,8 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +30,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -54,6 +55,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
@@ -145,24 +149,19 @@ private fun HudBubble(running: Boolean, expanded: Boolean, cb: HudCallbacks) {
                 )
             },
     ) {
+        // 瑪麗安頭像；展開時外圈加上主題色邊框
         Surface(
             shape = CircleShape,
-            color = when {
-                running -> cs.primary
-                expanded -> cs.secondaryContainer
-                else -> cs.surfaceContainerHigh
-            },
-            contentColor = when {
-                running -> cs.onPrimary
-                expanded -> cs.onSecondaryContainer
-                else -> cs.onSurface
-            },
             shadowElevation = 6.dp,
+            border = if (expanded && !running) BorderStroke(2.dp, cs.primary) else null,
             modifier = Modifier.size(48.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SmartToy, contentDescription = "NIKKE 推圖助手")
-            }
+            Image(
+                painter = painterResource(R.drawable.marian_avatar),
+                contentDescription = "瑪麗安助手",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(48.dp).clip(CircleShape),
+            )
         }
         // 運行中時，圓鈕外圈有轉動的進度環
         if (running) {
@@ -206,11 +205,20 @@ private fun HudPanel(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // 標題與狀態標籤
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "NIKKE 推圖助手",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
+                    Image(
+                        painter = painterResource(R.drawable.marian_avatar),
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp).clip(CircleShape),
                     )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("瑪麗安助手", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "MarianHelper",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = if (running) cs.primaryContainer else cs.surfaceContainerHighest,
