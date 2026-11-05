@@ -104,7 +104,19 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
         onDispose { prefs.unlisten(l) }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("瑪麗安助手") }) }) { pad ->
+    Scaffold(topBar = {
+        TopAppBar(title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("瑪麗安助手")
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        })
+    }) { pad ->
         Column(
             Modifier
                 .fillMaxSize()
@@ -113,41 +125,6 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // 封面
-            Card(shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth()) {
-                Image(
-                    painter = painterResource(R.drawable.marian_cover),
-                    contentDescription = "瑪麗安助手 MarianHelper",
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(1.6f),
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("瑪麗安助手", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            "MarianHelper · 妮姬主線推圖",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    ) {
-                        Text(
-                            "v${BuildConfig.VERSION_NAME}",
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        )
-                    }
-                }
-            }
-
             // 服務狀態
             Card(
                 colors = CardDefaults.cardColors(

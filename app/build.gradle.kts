@@ -16,9 +16,25 @@ android {
         versionName = "1.0.0"
     }
 
+    // 固定簽章：GitHub Actions 從 Secrets 解出金鑰後透過環境變數傳進來。
+    // 沒有設定時（例如本機編譯）就照舊用 debug 簽章。
+    val ksFile = System.getenv("MH_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    val ksPass = System.getenv("MH_KEYSTORE_PASSWORD")
+    signingConfigs {
+        if (ksFile != null && !ksPass.isNullOrEmpty()) {
+            create("marian") {
+                storeFile = ksFile
+                storePassword = ksPass
+                keyAlias = "marian"
+                keyPassword = ksPass
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("marian")
         }
     }
     compileOptions {
