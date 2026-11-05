@@ -302,15 +302,28 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         act.launchGame()
         val end = System.currentTimeMillis() + timeoutMs
         var touched = false
+        var titleSeen = 0
         while (System.currentTimeMillis() < end) {
             val f = look()
             lastFrame = f
-            val touch = f.find("TOUCHTOCONTINUE", "TOUCHTO")
+            val touch = f.find("TOUCHTOCONTINUE", "TOUCHTO", "TOCONTINU", "CONTINUE")
+            // 標題畫面：下方有版本號／版權字樣，讀取條跑完（沒有 x/7、x/2 進度）時就可以點
+            val title = f.find("ALLRIGHTS", "RESERVED", "SHIFTUP", "VERSION", yMin = 0.85f) != null &&
+                f.lines.none { l -> Regex("""^\d/\d$""").matches(l.norm) }
+            titleSeen = if (title) titleSeen + 1 else 0
             when {
                 touch != null -> {
                     act.status("登入：點擊進入遊戲")
                     tap(touch)
                     touched = true
+                    delay(3000)
+                }
+                // 字讀不到但標題畫面已經停住 3 次（約 5 秒）：直接點畫面中下方
+                titleSeen >= 3 -> {
+                    act.status("登入：點擊進入遊戲")
+                    tapAt(f.w * 0.5f, f.h * 0.78f, precise = false)
+                    touched = true
+                    titleSeen = 0
                     delay(3000)
                 }
                 // 還沒按過 TOUCH 但已經看得到大廳（被遮住也算），表示遊戲早就開著
@@ -520,10 +533,9 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null } ?: b
         }
         val claim = b.find("全部領取", "全部领取", yMin = 0.6f)
-        val sendAll = b.lines.firstOrNull { l ->
-            !l.isWord && l.box.exactCenterY() > b.h * 0.6f && l.norm.contains("派遣") &&
-                !l.norm.contains("公告") && !l.norm.contains("等級")
-        } ?: claim?.let { c ->
+        val sendAll = b.lines.filter { l ->
+            !l.isWord && l.box.exactCenterY() > b.h * 0.6f && (l.norm.contains("全部派遣") || l.norm.contains("全部派"))
+        }.maxByOrNull { it.box.top } ?: claim?.let { c ->
             TextLine("全部派遣", android.graphics.Rect(
                 (c.box.left - b.w * 0.25f).toInt(), c.box.top, (c.box.right - b.w * 0.25f).toInt(), c.box.bottom))
         }
@@ -757,8 +769,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val dlg = tapUntil(up, waitMs = 6_000) { button(it, "升級", "升级", yMin = 0.5f) != null }
             ?: return Result.Fail("升級視窗沒有打開")
         act.status("妮姬升級：升級 1 次")
-        tap(button(dlg, "升級", "升级", yMin = 0.5f)!!)
-        delay(1500)
+        delay(1200)   // 視窗動畫
+        val leveled = { fr: Frame -> fr.lines.any { l -> Regex("""LV\.?2/\d""").containsMatchIn(l.norm) || Regex("""^2>3""").containsMatchIn(l.norm.replace("升級", "")) } }
+        var ok = false
+        repeat(3) {
+            if (ok) return@repeat
+            val cur = look()
+            val b = button(cur, "升級", "升级", yMin = 0.5f) ?: return@repeat
+            tap(b)
+            delay(1800)
+            val now = look()
+            // 升級成功：視窗裡的等級變成 2 → 3，或視窗已經關掉、詳細頁顯示 LV.2
+            ok = leveled(now) || (button(now, "升級", "升级", yMin = 0.5f) == null)
+        }
 
         // 關掉升級視窗：點標題「升級」右邊的 X
         val after = look()
