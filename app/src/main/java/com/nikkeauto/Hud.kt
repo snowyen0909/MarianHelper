@@ -226,8 +226,9 @@ private fun HudPanel(
                         )
                     }
                     // 關閉 HUD
-                    IconButton(onClick = { cb.hide() }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "關閉 HUD")
+                    // X：只收起面板，圓鈕留著（要整個隱藏請長按圓鈕）
+                    IconButton(onClick = { cb.toggleExpanded() }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = "收起面板")
                     }
                 }
 
