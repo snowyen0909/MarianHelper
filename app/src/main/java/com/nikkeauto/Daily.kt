@@ -780,15 +780,14 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     }
 
     /** 進方舟裡的某個設施（競技場、無限之塔）。 */
-    private suspend fun enterArk(vararg facility: String): Frame? {
+    private suspend fun enterArk(vararg facility: String, arrived: (Frame) -> Boolean): Frame? {
         val f = lobby()
         val ark = f.find("方舟", yMin = 0.5f) ?: return null
-        val a = tapUntil(ark, waitMs = 25_000) { it.find(*facility, yMin = 0.15f) != null } ?: return null
+        val a = tapUntil(ark, waitMs = 25_000) { it.find(*facility, yMin = 0.15f) != null || arrived(it) } ?: return null
+        if (arrived(a)) return a
         val fac = a.find(*facility, yMin = 0.15f)!!
-        // 設施名稱在卡片下方，點卡片中間比較穩
-        return tapUntil(fac.box.exactCenterX(), fac.box.exactCenterY() - a.w * 0.1f, waitMs = 25_000) {
-            it.find(*facility, yMin = 0.15f) == null
-        } ?: a
+        // 設施名稱在卡片下方，點卡片中間比較穩；點一次後耐心等，不要重複點
+        return tapUntil(fac.box.exactCenterX(), fac.box.exactCenterY() - a.w * 0.1f, tries = 2, waitMs = 25_000) { arrived(it) }
     }
 
     private fun numbers(f: Frame, yFrom: Float, yTo: Float, xMax: Float = Float.MAX_VALUE): List<Pair<Long, TextLine>> =
@@ -797,8 +796,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     /** 競技場：有比自己戰力低的就打最低的，沒有就打第三個；只用免費次數。 */
     private suspend fun arena(): Result {
-        enterArk("競技場", "竞技场") ?: return Result.Fail("找不到競技場")
         val isMain = { fr: Frame -> fr.has("ROOKIE") && fr.has("SPECIAL") && !fr.has("ROOKIEARENA", "SPECIALARENA") }
+        enterArk("競技場", "竞技场") { isMain(it) } ?: return Result.Fail("找不到競技場")
         waitFor(25_000) { isMain(it) } ?: return Result.Fail("競技場沒有打開")
         delay(2000)   // 卡片進場動畫
         val a = look()
@@ -897,13 +896,13 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     }
 
     /** 下方四座企業塔（由左到右），以及開放的星期（Calendar.DAY_OF_WEEK：1=日 … 7=六）。 */
-    private class CorpTower(val name: String, val keys: List<String>, val xFrac: Float, val days: Set<Int>)
+    private class CorpTower(val name: String, val keys: List<String>, val xFrac: Float, val days: Set<Int>, val tpl: String)
 
     private val CORP_TOWERS = listOf(
-        CorpTower("極樂淨土之塔", listOf("ELYSION", "極樂", "极乐"), 0.155f, setOf(3, 6, 1)),   // 二、五、日
-        CorpTower("米西利斯之塔", listOf("MISSILIS", "米西利斯"), 0.38f, setOf(4, 7, 1)),        // 三、六、日
-        CorpTower("泰特拉之塔", listOf("TETRA", "泰特拉"), 0.61f, setOf(2, 5, 1)),               // 一、四、日
-        CorpTower("朝聖者之塔", listOf("PILGRIM", "朝聖", "朝圣"), 0.84f, setOf(4, 1)),          // 三、日
+        CorpTower("極樂淨土之塔", listOf("ELYSION", "極樂", "极乐"), 0.155f, setOf(3, 6, 1), "tower_elysion"),   // 二、五、日
+        CorpTower("米西利斯之塔", listOf("MISSILIS", "米西利斯"), 0.38f, setOf(4, 7, 1), "tower_missilis"),        // 三、六、日
+        CorpTower("泰特拉之塔", listOf("TETRA", "泰特拉"), 0.61f, setOf(2, 5, 1), "tower_tetra"),               // 一、四、日
+        CorpTower("朝聖者／超標準之塔", listOf("PILGRIM", "OVERSPEC", "朝聖", "朝圣", "超標準"), 0.84f, setOf(4, 1), "tower_pilgrim"),          // 三、日
     )
 
     /** 遊戲日的星期（台灣時間，每天 13:00 換日）。 */
@@ -924,9 +923,13 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val notes = ArrayList<String>()
         for (ct in today) {
             act.status("無盡之塔：${ct.name}")
-            enterArk("無限之塔", "无限之塔", "無盡之塔") ?: return Result.Fail("找不到無限之塔")
-            val t = waitFor(25_000) { it.has("TRIBE", "TOWER") && (it.exact("OPEN").isNotEmpty() || it.exact("CLOSE").isNotEmpty()) }
-                ?: return Result.Fail("塔列表沒有打開")
+            // 塔列表：上方有「可以選擇塔進入」，或看得到下方企業塔的名稱
+            val isList = { fr: Frame ->
+                fr.has("可以選擇塔", "可以选择塔", "選擇塔進入") ||
+                    fr.lines.count { l -> l.box.exactCenterY() > fr.h * 0.6f && listOf("ELYSION", "MISSILIS", "TETRA", "PILGRIM").any { k -> l.norm.contains(k) } } >= 2
+            }
+            enterArk("無限之塔", "无限之塔", "無盡之塔") { isList(it) } ?: return Result.Fail("找不到無限之塔")
+            waitFor(25_000) { isList(it) } ?: return Result.Fail("塔列表沒有打開")
             delay(1500)   // 進場動畫
             val list = look()
             // 用塔名找欄位；讀不到就用固定的欄位位置
@@ -934,10 +937,14 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val cx = label?.box?.exactCenterX() ?: (list.w * ct.xFrac)
             val col = { l: TextLine -> kotlin.math.abs(l.box.exactCenterX() - cx) < list.w * 0.1f }
             if (list.exact("CLOSE").any(col)) { notes += "${ct.name} 今天沒開"; toLobby(60_000); continue }
+            // 塔的圓形徽章（圖片比對，要在這座塔的欄位裡）
+            val emblem = Templates.find(list.bmp, ct.tpl, 0f, 0.55f, 1f, 0.85f)
+                ?.takeIf { it.score >= 0.75f && kotlin.math.abs(it.x - list.w * ct.xFrac) < list.w * 0.12f }
             // 依序試：塔的圖示（OPEN 標籤下方）、塔名、「每日通關」那行
             val tag = list.exact("OPEN").firstOrNull(col)
             val daily = list.lines.firstOrNull { l -> !l.isWord && col(l) && (l.norm.contains("每日") || l.norm.contains("通關")) && l.box.exactCenterY() > list.h * 0.6f }
             val ys = listOfNotNull(
+                emblem?.y,
                 tag?.let { it.box.exactCenterY() + list.w * 0.25f },
                 label?.box?.exactCenterY(),
                 daily?.box?.exactCenterY(),
@@ -949,7 +956,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             var inside: Frame? = null
             for (y in ys) {
                 act.status("無盡之塔：進入 ${ct.name}")
-                tapAt(cx, y, precise = false)
+                tapAt(if (y == emblem?.y) emblem.x else cx, y, precise = false)
                 val fr = waitFor(12_000) { isInside(it) } ?: continue
                 delay(1500)
                 val now = look()
@@ -957,7 +964,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 // 進錯塔（TRIBE TOWER）：按返回回到塔列表再試下一個位置
                 act.status("無盡之塔：進錯塔，返回")
                 now.find("返回", yMin = 0.85f)?.let { tap(it) } ?: act.back()
-                waitFor(15_000) { it.has("TRIBE") && (it.exact("OPEN").isNotEmpty() || it.exact("CLOSE").isNotEmpty()) }
+                waitFor(15_000) { isList(it) }
                 delay(1500)
                 if (fr === now) Unit
             }
