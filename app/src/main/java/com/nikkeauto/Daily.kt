@@ -378,6 +378,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         return false
     }
 
+    /** 找按鈕：文字結尾是 key（前面可能有圖示被讀成符號），排除視窗標題。 */
+    private fun button(f: Frame, vararg keys: String, yMin: Float = 0.45f): TextLine? =
+        f.lines.filter { l ->
+            !l.isWord && l.box.exactCenterY() > f.h * yMin && l.norm.length <= 6 && keys.any { l.norm.endsWith(it) }
+        }.maxByOrNull { it.box.top }
+
+    /** 兩顆按鈕的視窗：讀不到右邊按鈕時，用左邊「取消」往右推。 */
+    private fun rightOfCancel(f: Frame): TextLine? =
+        f.lines.filter { !it.isWord && it.norm.endsWith("取消") && it.box.exactCenterY() > f.h * 0.45f }.maxByOrNull { it.box.top }?.let { c ->
+            TextLine("確定", android.graphics.Rect(
+                (c.box.left + f.w * 0.36f).toInt(), c.box.top, (c.box.right + f.w * 0.36f).toInt(), c.box.bottom))
+        }
+
     private suspend fun lobby(): Frame {
         val end = System.currentTimeMillis() + 25_000
         var prev: Frame? = null
@@ -643,7 +656,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             d.exact("取消").firstOrNull()?.let { tap(it) }
             return Result.Skip("不是免費的，已取消")
         }
-        val buy = d.exact("購買", "购买").maxByOrNull { it.box.top } ?: return Result.Fail("找不到購買按鈕")
+        val buy = button(d, "購買", "购买") ?: rightOfCancel(d) ?: return Result.Fail("找不到購買按鈕")
         tap(buy)
         waitFor(8_000) { it.find(*CONTINUE) == null && isShop(it) }
         return Result.Done
@@ -689,6 +702,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         }
         val isLv1 = { fr: Frame -> fr.lines.any { Regex("""LV\.?1/\d""").containsMatchIn(it.norm) } }
 
+        // 先切換排序（▼ 變 ▲，等級低的排前面）
+        list = toggleSort(list) ?: return Result.Fail("切換排序失敗")
         for (attempt in 0..1) {
             val sort = sortBox(list) ?: return Result.Fail("找不到排序框")
             // 第一張卡：排序框左下方
@@ -701,25 +716,35 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             act.status("妮姬升級：第一隻不是 LV.1，切換排序")
             act.back(); delay(1500)
             list = waitFor(10_000) { isList(it) } ?: return Result.Fail("回不到妮姬列表")
-            val s2 = sortBox(list)!!
-            val panel = tapUntil(list.w * 0.935f, s2.box.exactCenterY(), waitMs = 5_000) { it.has("排序") }
-                ?: return Result.Fail("排序面板沒有打開")
-            panel.lines.firstOrNull { l ->
-                !l.isWord && (l.norm.contains("戰鬥力") || l.norm.contains("战斗力")) &&
-                    l.box.top > s2.box.bottom && l.box.exactCenterX() < panel.w * 0.6f
-            }?.let { tap(it) } ?: return Result.Fail("找不到戰鬥力排序")
-            if (look().has("排序")) tapAt(list.w * 0.935f, s2.box.exactCenterY())
-            list = waitFor(6_000) { isList(it) && !it.has("排序") } ?: return Result.Fail("排序面板關不掉")
+            list = toggleSort(list) ?: return Result.Fail("切換排序失敗")
         }
         return Result.Fail("不明原因")
+    }
+
+    /** 切換排序方向：點右上箭頭打開面板 → 點「戰鬥力」→ 面板還開著就再點箭頭關掉。 */
+    private suspend fun toggleSort(list: Frame): Frame? {
+        val sort = sortBox(list) ?: return null
+        val ax = list.w * 0.935f
+        val ay = sort.box.exactCenterY()
+        val isPanel = { fr: Frame -> fr.find("篩選", "筛选", "火力型", "防禦型", "輔助型") != null }
+        val panel = tapUntil(ax, ay, waitMs = 5_000) { isPanel(it) } ?: return null
+        val chip = panel.lines.firstOrNull { l ->
+            !l.isWord && (l.norm.contains("戰鬥力") || l.norm.contains("战斗力")) &&
+                l.box.top > sort.box.bottom && l.box.exactCenterX() < panel.w * 0.6f
+        } ?: return null
+        tap(chip)
+        delay(800)
+        repeat(2) { if (isPanel(look())) { tapAt(ax, ay); delay(800) } }
+        val now = look()
+        return if (isPanel(now)) null else now
     }
 
     private suspend fun upgradeAndReset(d: Frame): Result {
         val up = d.lines.firstOrNull { !it.isWord && it.norm.contains("升級") && !it.norm.contains("等級") }
             ?: return Result.Fail("找不到升級按鈕")
         tap(up)
-        val dlg = waitFor(6_000) { it.exact("升級", "升级", yMin = 0.5f).isNotEmpty() } ?: return Result.Fail("升級視窗沒有打開")
-        tap(dlg.exact("升級", "升级", yMin = 0.5f).maxByOrNull { it.box.top }!!)
+        val dlg = waitFor(6_000) { button(it, "升級", "升级", yMin = 0.5f) != null } ?: return Result.Fail("升級視窗沒有打開")
+        tap(button(dlg, "升級", "升级", yMin = 0.5f)!!)
         delay(1500)
         // 關掉升級視窗
         val after = look()
@@ -756,11 +781,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         // 「ROOKIE」和「SPECIAL」常被讀成同一行，所以用單字的位置；都讀不到就點左半邊
         val rookie = a.lines.firstOrNull { it.isWord && (it.norm.contains("ROOKIE") || it.norm.startsWith("新人")) && it.box.exactCenterX() < a.w * 0.5f }
         val special = a.lines.firstOrNull { it.isWord && it.norm.contains("SPECIAL") }
-        val (rx, ry) = when {
-            rookie != null -> rookie.box.exactCenterX() to rookie.box.exactCenterY()
-            special != null -> a.w * 0.25f to special.box.exactCenterY()
-            else -> a.w * 0.25f to a.h * 0.5f
-        }
+        val champ = a.lines.firstOrNull { !it.isWord && it.norm.contains("CHAMPION") }
+        // 新人競技場一定在左邊那張卡：x 固定在左側 25%，y 用同一列的文字定位
+        val rx = a.w * 0.25f
+        val ry = rookie?.box?.exactCenterY() ?: special?.box?.exactCenterY()
+            ?: champ?.let { it.box.exactCenterY() - a.h * 0.12f } ?: (a.h * 0.5f)
         val inRookie = { fr: Frame -> fr.has("ROOKIEARENA", "新人競技場", "新人竞技场") && !fr.has("SPECIALARENA", "特殊競技場", "特殊竞技场") &&
             fr.lines.any { l -> !l.isWord && (l.norm.contains("進入戰") || l.norm.contains("进入战")) } }
         tapUntil(rx, ry) { inRookie(it) } ?: return Result.Fail("沒有進入新人競技場")
@@ -810,10 +835,22 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             act.status("競技場：進入戰鬥")
             tapAt(go.x, go.y, precise = false)
             // 等勝負畫面，「點擊進行下一步」由 handleCommon 點掉
-            waitFor(180_000, handle = false) { it.has("WIN", "DEFEAT", "點擊進行下一步", "点击进行下一步") }
+            waitFor(180_000, handle = false) { it.has("WIN", "DEFEAT", "點擊進行", "点击进行", "RANK") }
                 ?: return Result.Fail("戰鬥沒有結束")
             done++
-            waitFor(15_000) { it.has("新人競技場", "新人竞技场", "ROOKIE") }
+            act.status("競技場：第 $done 場結束，點擊進行下一步")
+            // 結算畫面：點「點擊進行下一步」（讀不到就點畫面下方），直到回到對手列表
+            var back = false
+            repeat(6) {
+                val e = look()
+                if (e.has("ROOKIEARENA", "新人競技場", "新人竞技场") && e.lines.any { l -> l.norm.contains("進入戰") || l.norm.contains("进入战") }) {
+                    back = true; return@repeat
+                }
+                val next = e.find("點擊進行", "点击进行", "進行下一步", "进行下一步")
+                if (next != null) tap(next) else tapAt(e.w * 0.5f, e.h * 0.8f, precise = false)
+                delay(2000)
+            }
+            if (!back) waitFor(15_000) { it.has("新人競技場", "新人竞技场", "ROOKIE") }
         }
         return Result.Done
     }
