@@ -15,7 +15,7 @@
 
 1. 在 GitHub 建立新的 repository，把這個資料夾全部上傳。
 2. 推送後 Actions 會自動執行「Build APK」（也可以在 Actions 頁手動按 Run workflow）。
-3. 完成後到該次執行頁面最下方 Artifacts，下載 `MarianHelper-v版本號`，解壓後安裝 APK。
+3. 完成後到該次執行頁面最下方 Artifacts，下載 `MarianHelper-v版本號`；正式版請到 Releases 頁面下載，解壓後安裝 APK。
 
 ## 使用方式
 
@@ -56,6 +56,14 @@ app/src/main/java/com/nikkeauto/
   Prefs.kt          開關與參數
 ```
 
+## 發布新版本
+
+1. 修改 `app/build.gradle.kts` 的 `versionCode`、`versionName`，並在下方「版本紀錄」新增 `### v版本號` 段落。
+2. 到 GitHub 的 **Actions → Publish Release → Run workflow**。
+3. 完成後 Releases 會出現新版本，附上固定簽章的 APK。
+
+（需要先在 Settings → Secrets and variables → Actions 設定 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`。）
+
 ## 版本紀錄
 
 ### v1.0.0（第一版正式版）
@@ -66,6 +74,7 @@ app/src/main/java/com/nikkeauto/
 - 出擊準備：可用時點快速戰鬥，否則進入戰鬥；只在野外自動戰鬥。
 - 任務箭頭換區、前哨基地指揮中心與方舟設施的劇情。
 - 戰鬥失敗、被門擋住、探路找不到目標時停止並通知。
+- 固定簽章的正式版，之後可直接覆蓋更新。
 
 ## 已知限制
 

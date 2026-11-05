@@ -1,0 +1,64 @@
+name: Publish Release
+
+# 在 Actions 頁面手動執行：編譯固定簽章的正式版 APK，並發布到 Releases。
+# 版本號取自 app/build.gradle.kts 的 versionName，更新說明取自 README.md 的「### v版本號」段落。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # 正式版一定要用固定簽章，否則之後的版本無法覆蓋更新
+      - name: Decode signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::請先在 Settings → Secrets and variables → Actions 新增 KEYSTORE_BASE64 和 KEYSTORE_PASSWORD"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/marian.jks"
+          echo "MH_KEYSTORE=$RUNNER_TEMP/marian.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed APK
+        env:
+          MH_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Prepare files
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk "out/MarianHelper-v${VER}.apk"
+          # 從 README 取出這個版本的更新說明
+          awk -v v="### v${VER}" '
+            index($0, v) == 1 { on = 1; next }
+            on && /^##/ { exit }
+            on { print }
+          ' README.md > out/notes.md
+          printf '\n需要 Android 11 以上。第一次從舊版（debug 簽章）換到正式版時，請先解除安裝舊版。\n' >> out/notes.md
+          echo "VER=${VER}" >> "$GITHUB_ENV"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VER }}
+          target_commitish: ${{ github.sha }}
+          name: 瑪麗安助手 MarianHelper v${{ env.VER }}
+          body_path: out/notes.md
+          files: out/MarianHelper-v${{ env.VER }}.apk
