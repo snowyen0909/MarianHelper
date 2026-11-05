@@ -935,10 +935,24 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             else -> return Result.Fail("找不到任務列")
         }
         val m = tapUntil(x, y, precise = true) { missionTitle(it) != null } ?: return Result.Fail("任務視窗沒有打開")
-        val all = m.find("全部領取", "全部领取", yMin = 0.6f) ?: return Result.Skip("沒有可領的任務")
-        tap(all)
-        val after = waitFor(10_000) { missionTitle(it) != null && it.find(*CONTINUE) == null }
-        after?.let { a -> missionTitle(a)?.let { closePopup(a, it, -a.h * 0.035f) } }
+        // 要按兩次「全部領取」：第一次領各項任務獎勵，任務點數累積後第二次才領上方的點數寶箱。
+        // 每次領完等獎勵畫面點掉、清單更新後再按下一次；出現 CLEARED（全部完成）就停。
+        var claimed = 0
+        var cur: Frame = m
+        repeat(3) { i ->
+            if (cur.has("CLEARED")) return@repeat
+            val all = cur.find("全部領取", "全部领取", yMin = 0.6f) ?: return@repeat
+            act.status("每日任務：第 ${i + 1} 次全部領取")
+            tap(all)
+            claimed++
+            // 等獎勵畫面出現並點掉，回到任務視窗
+            waitFor(10_000) { missionTitle(it) != null && it.find(*CONTINUE) == null }
+            delay(2500)   // 讓任務點數和寶箱狀態更新
+            cur = look()
+        }
+        if (claimed == 0) return Result.Skip("沒有可領的任務")
+        val last = look()
+        missionTitle(last)?.let { closePopup(last, it, -last.h * 0.035f) }
         return Result.Done
     }
 }
