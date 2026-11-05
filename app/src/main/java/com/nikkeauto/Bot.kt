@@ -14,6 +14,16 @@ interface Actions {
     suspend fun humanDelay()
     fun status(text: String)
     fun stopWithAlert(title: String, body: String)
+
+    // ---- 一鍵日常用 ----
+    /** 截一張圖並辨識文字。 */
+    suspend fun look(): Frame?
+    /** 妮姬不在前景時打開遊戲。 */
+    fun launchGame()
+    /** 存一張除錯截圖到相簿（Pictures/MarianHelper）。 */
+    fun saveDebug(bmp: Bitmap, name: String)
+    /** 發一則一般通知。 */
+    fun notify(title: String, body: String)
 }
 
 /** 每一輪：截圖 → 讀字 → 判斷畫面 → 做一個動作。 */

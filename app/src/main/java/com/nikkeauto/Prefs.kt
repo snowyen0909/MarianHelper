@@ -42,6 +42,29 @@ class Prefs(context: Context) {
     fun listen(l: SharedPreferences.OnSharedPreferenceChangeListener) = sp.registerOnSharedPreferenceChangeListener(l)
     fun unlisten(l: SharedPreferences.OnSharedPreferenceChangeListener) = sp.unregisterOnSharedPreferenceChangeListener(l)
 
+    // ---------- 一鍵日常 ----------
+
+    /** 項目順序；新版加入的項目自動接在最後。 */
+    var dailyOrder: List<DailyTask>
+        get() {
+            val saved = sp.getString(K_DAILY_ORDER, "")!!.split(",").mapNotNull { DailyTask.of(it) }.distinct()
+            return saved + DailyTask.entries.filter { it !in saved }
+        }
+        set(v) = sp.edit().putString(K_DAILY_ORDER, v.joinToString(",") { it.key }).apply()
+
+    fun dailyEnabled(t: DailyTask) = sp.getBoolean("daily_on_${t.key}", true)
+    fun setDailyEnabled(t: DailyTask, on: Boolean) = sp.edit().putBoolean("daily_on_${t.key}", on).apply()
+
+    /** 競技場每天打幾場（不論輸贏），預設 2。 */
+    var arenaCount: Int
+        get() = sp.getInt(K_ARENA, 2)
+        set(v) = sp.edit().putInt(K_ARENA, v.coerceIn(1, 5)).apply()
+
+    /** 無盡之塔每座打幾次，預設 3（每天上限）。 */
+    var towerCount: Int
+        get() = sp.getInt(K_TOWER, 3)
+        set(v) = sp.edit().putInt(K_TOWER, v.coerceIn(1, 3)).apply()
+
     var delayMin: Int
         get() = sp.getInt(K_DMIN, 500)
         set(v) = sp.edit().putInt(K_DMIN, v).apply()
@@ -57,6 +80,9 @@ class Prefs(context: Context) {
         private const val K_PATROL = "patrol"
         private const val K_ONLY_MAIN = "only_main"
         private const val K_DMIN = "delay_min"
+        private const val K_DAILY_ORDER = "daily_order"
+        private const val K_ARENA = "daily_arena_count"
+        private const val K_TOWER = "daily_tower_count"
         private const val K_SHOW_OV = "show_overlay"
         private const val K_OV_GAME = "overlay_only_in_game"
         private const val K_DMAX = "delay_max"

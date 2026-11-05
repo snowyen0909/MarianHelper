@@ -150,7 +150,7 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                             Button(onClick = { AutoService.instance?.toggle() }) {
                                 Icon(if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (running) "停止" else "開始")
+                                Text(if (running) "停止" else "開始推圖")
                             }
                             FilledTonalButton(onClick = openA11y) { Text("無障礙設定") }
                         }
@@ -176,6 +176,9 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     }
                 }
             }
+
+            // 一鍵日常
+            DailyCard(prefs, connected, running)
 
             // 功能開關
             Card(Modifier.fillMaxWidth()) {

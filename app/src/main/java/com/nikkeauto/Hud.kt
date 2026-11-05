@@ -39,6 +39,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -96,6 +98,7 @@ class OverlayLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner {
 interface HudCallbacks {
     fun toggleExpanded()
     fun startStop()
+    fun startDaily()
     fun hide()
     fun drag(dx: Float, dy: Float)
     fun dragEnd()
@@ -255,6 +258,13 @@ private fun HudPanel(
                     Icon(if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow, null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (running) "停止" else "開始推圖")
+                }
+                if (!running) {
+                    OutlinedButton(onClick = { cb.startDaily() }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.PlaylistPlay, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("一鍵日常")
+                    }
                 }
 
                 // 功能開關

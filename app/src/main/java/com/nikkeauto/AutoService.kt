@@ -125,6 +125,41 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
 
     fun toggle() = if (loop?.isActive == true) stopBot() else startBot()
 
+    /** 截圖並辨識文字；畫面縮成寬 720，左上角另外用原解析度讀小字。 */
+    private suspend fun snapshot(): Frame? {
+        val shot = capture() ?: return null
+        scale = shot.width / Vision.WIDTH.toFloat()
+        val small = Vision.normalize(shot)
+        val crop = Bitmap.createBitmap(shot, 0, 0, shot.width / 2, (shot.height * 0.4f).toInt())
+        val extra = reader.read(crop).map { l ->
+            val b = l.box
+            TextLine(
+                l.text,
+                android.graphics.Rect(
+                    (b.left / scale).toInt(), (b.top / scale).toInt(),
+                    (b.right / scale).toInt(), (b.bottom / scale).toInt(),
+                ),
+                l.isWord,
+            )
+        }
+        crop.recycle()
+        shot.recycle()
+        // HUD 自己的文字和顏色也會被截到，要排除
+        val ov = overlayRect
+        Vision.hudRect = ov?.let {
+            android.graphics.RectF(it.left / scale, it.top / scale, it.right / scale, it.bottom / scale)
+        }
+        val lines = (reader.read(small) + extra).filter { l ->
+            ov == null || !ov.contains(
+                (l.box.exactCenterX() * scale).toInt(),
+                (l.box.exactCenterY() * scale).toInt(),
+            )
+        }
+        return Frame(small, lines)
+    }
+
+    override suspend fun look(): Frame? = snapshot()
+
     fun startBot() {
         if (loop?.isActive == true) return
         val bot = Bot(prefs, this)
@@ -134,43 +169,37 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
             status("啟動中…")
             while (isActive) {
                 try {
-                    val shot = capture()
-                    if (shot == null) { delay(700); continue }
-                    scale = shot.width / Vision.WIDTH.toFloat()
-                    val small = Vision.normalize(shot)
-                    // 左上角（小地圖計數、場景標籤）字很小，用原始解析度再讀一次
-                    val crop = Bitmap.createBitmap(shot, 0, 0, shot.width / 2, (shot.height * 0.4f).toInt())
-                    val extra = reader.read(crop).map { l ->
-                        val b = l.box
-                        TextLine(
-                            l.text,
-                            android.graphics.Rect(
-                                (b.left / scale).toInt(), (b.top / scale).toInt(),
-                                (b.right / scale).toInt(), (b.bottom / scale).toInt(),
-                            ),
-                            l.isWord,
-                        )
-                    }
-                    crop.recycle()
-                    shot.recycle()
-                    // HUD 自己的文字和顏色也會被截到，要排除
-                    val ov = overlayRect
-                    Vision.hudRect = ov?.let {
-                        android.graphics.RectF(it.left / scale, it.top / scale, it.right / scale, it.bottom / scale)
-                    }
-                    val lines = (reader.read(small) + extra).filter { l ->
-                        ov == null || !ov.contains(
-                            (l.box.exactCenterX() * scale).toInt(),
-                            (l.box.exactCenterY() * scale).toInt(),
-                        )
-                    }
-                    bot.step(small, lines)
+                    val f = snapshot()
+                    if (f == null) { delay(700); continue }
+                    bot.step(f.bmp, f.lines)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     status("錯誤：${e.message}")
                 }
                 delay(600)
+            }
+        }
+    }
+
+    /** 一鍵日常：跑完後發通知列出每一項的結果。 */
+    override fun startDaily() {
+        if (loop?.isActive == true) return
+        running.value = true
+        hudExpanded = false
+        loop = scope.launch {
+            val summary = try {
+                DailyRunner(prefs, this@AutoService).run()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "發生錯誤：${e.message}"
+            }
+            notify("一鍵日常完成", summary)
+            main.post {
+                loop = null
+                running.value = false
+                status("一鍵日常完成")
             }
         }
     }
@@ -260,6 +289,46 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
 
     override fun status(text: String) {
         lastStatus.value = text
+    }
+
+    override fun launchGame() {
+        if (inGame) return
+        val pm = packageManager
+        val launcher = android.content.Intent(android.content.Intent.ACTION_MAIN)
+            .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        val app = pm.queryIntentActivities(launcher, 0).firstOrNull { ri ->
+            ri.activityInfo.packageName.contains("nikke", ignoreCase = true) ||
+                ri.loadLabel(pm).toString().let { it.contains("NIKKE", ignoreCase = true) || it.contains("妮姬") }
+        } ?: return
+        pm.getLaunchIntentForPackage(app.activityInfo.packageName)?.let {
+            it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(it)
+        }
+    }
+
+    override fun saveDebug(bmp: Bitmap, name: String) {
+        try {
+            val time = java.text.SimpleDateFormat("MMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "${name}_$time.png")
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MarianHelper")
+            }
+            val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return
+            contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun notify(title: String, body: String) {
+        val n = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_more)
+            .setContentTitle(title)
+            .setContentText(body.lineSequence().firstOrNull() ?: "")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(2, n)
     }
 
     override fun stopWithAlert(title: String, body: String) {
