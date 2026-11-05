@@ -945,8 +945,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             act.status("每日任務：第 ${i + 1} 次全部領取")
             tap(all)
             claimed++
-            // 等獎勵畫面出現並點掉，回到任務視窗
-            waitFor(10_000) { missionTitle(it) != null && it.find(*CONTINUE) == null }
+            // 先等獎勵畫面真的出現（REWARD／點擊領取獎勵），點掉後再等任務視窗回來；
+            // 沒出現獎勵畫面代表這次沒東西可領
+            val rew = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || it.has("REWARD") }
+            if (rew != null) {
+                repeat(4) {
+                    val r = look()
+                    if (missionTitle(r) != null && r.find(*CONTINUE) == null && !r.has("REWARD")) return@repeat
+                    r.find(*CONTINUE)?.let { c -> tap(c) } ?: tapAt(r.w * 0.5f, r.h * 0.8f, precise = false)
+                    delay(1200)
+                }
+            }
+            waitFor(10_000) { missionTitle(it) != null && it.find(*CONTINUE) == null && !it.has("REWARD") }
+            act.status("每日任務：等待清單更新")
             delay(2500)   // 讓任務點數和寶箱狀態更新
             cur = look()
         }

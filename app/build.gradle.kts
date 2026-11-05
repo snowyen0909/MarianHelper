@@ -12,8 +12,8 @@ android {
         applicationId = "com.nikkeauto"
         minSdk = 30          // takeScreenshot() 需要 Android 11 以上
         targetSdk = 34
-        versionCode = 135
-        versionName = "1.3.5"
+        versionCode = 136
+        versionName = "1.3.6"
     }
 
     // 固定簽章：GitHub Actions 從 Secrets 解出金鑰後透過環境變數傳進來。
