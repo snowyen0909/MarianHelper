@@ -721,40 +721,61 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         return Result.Fail("不明原因")
     }
 
-    /** 切換排序方向：點右上箭頭打開面板 → 點「戰鬥力」→ 面板還開著就再點箭頭關掉。 */
+    /**
+     * 切換排序方向：直接點右上「戰鬥力」框最右邊的小箭頭（▼ ↔ ▲），點一下就換，不會開面板。
+     * 只點一次，避免來回切換。
+     */
     private suspend fun toggleSort(list: Frame): Frame? {
         val sort = sortBox(list) ?: return null
-        val ax = list.w * 0.935f
-        val ay = sort.box.exactCenterY()
-        val isPanel = { fr: Frame -> fr.find("篩選", "筛选", "火力型", "防禦型", "輔助型") != null }
-        val panel = tapUntil(ax, ay, waitMs = 5_000) { isPanel(it) } ?: return null
-        val chip = panel.lines.firstOrNull { l ->
-            !l.isWord && (l.norm.contains("戰鬥力") || l.norm.contains("战斗力")) &&
-                l.box.top > sort.box.bottom && l.box.exactCenterX() < panel.w * 0.6f
-        } ?: return null
-        tap(chip)
-        delay(800)
-        repeat(2) { if (isPanel(look())) { tapAt(ax, ay); delay(800) } }
+        act.status("妮姬升級：切換排序")
+        tapAt(list.w * 0.935f, sort.box.exactCenterY())
+        delay(1500)
         val now = look()
-        return if (isPanel(now)) null else now
+        // 萬一打開的是排序面板，點同一個位置關掉
+        if (now.find("篩選", "筛选", "火力型", "防禦型") != null) {
+            tapAt(list.w * 0.935f, sort.box.exactCenterY()); delay(1000)
+            return look()
+        }
+        return now
     }
 
+    /** 點彈窗標題列右邊的 X（找不到樣本就點固定位置），不按返回鍵以免離開妮姬頁面。 */
+    private suspend fun closeDialogX(f: Frame, title: TextLine) {
+        val ty = title.box.exactCenterY() / f.h
+        val p = findCloseX(f, 0.55f, (ty - 0.05f).coerceAtLeast(0f), 1f, (ty + 0.05f).coerceAtMost(1f))
+            ?: Vision.Pt(f.w * 0.88f, title.box.exactCenterY())
+        tapAt(p.x, p.y)
+    }
+
+    /**
+     * 妮姬詳細頁：LV⁺升級 → 升級視窗按「升級」→ 點 X 關視窗 → 點等級旁的「等級重置」
+     * → 確認視窗按「等級重置」→ 領取獎勵。
+     */
     private suspend fun upgradeAndReset(d: Frame): Result {
-        val up = d.lines.firstOrNull { !it.isWord && it.norm.contains("升級") && !it.norm.contains("等級") }
-            ?: return Result.Fail("找不到升級按鈕")
-        tap(up)
-        val dlg = waitFor(6_000) { button(it, "升級", "升级", yMin = 0.5f) != null } ?: return Result.Fail("升級視窗沒有打開")
+        val up = d.lines.firstOrNull { !it.isWord && it.norm.contains("升級") && !it.norm.contains("等級") && it.box.exactCenterY() > d.h * 0.3f }
+            ?: return Result.Fail("找不到 LV⁺升級 按鈕")
+        val dlg = tapUntil(up, waitMs = 6_000) { button(it, "升級", "升级", yMin = 0.5f) != null }
+            ?: return Result.Fail("升級視窗沒有打開")
+        act.status("妮姬升級：升級 1 次")
         tap(button(dlg, "升級", "升级", yMin = 0.5f)!!)
         delay(1500)
-        // 關掉升級視窗
+
+        // 關掉升級視窗：點標題「升級」右邊的 X
         val after = look()
-        after.exact("升級", "升级", yMax = 0.3f).firstOrNull()?.let { closePopup(after, it) } ?: act.back()
+        val title = after.lines.filter { !it.isWord && (it.norm == "升級" || it.norm == "升级") && it.box.exactCenterY() < after.h * 0.5f }
+            .minByOrNull { it.box.top }
+        if (title != null) closeDialogX(after, title)
         delay(1000)
-        val det = waitFor(8_000) { it.has("等級重置", "等级重置") } ?: return Result.Fail("找不到等級重置")
-        tap(det.find("等級重置", "等级重置")!!)
-        val r = waitFor(6_000) { it.exact("等級重置", "等级重置", yMin = 0.5f).isNotEmpty() } ?: return Result.Fail("重置視窗沒有打開")
-        tap(r.exact("等級重置", "等级重置", yMin = 0.5f).maxByOrNull { it.box.top }!!)
-        waitFor(8_000) { it.find(*CONTINUE) == null && it.has("等級重置", "等级重置") }
+
+        val isReset = { fr: Frame -> fr.lines.any { !it.isWord && (it.norm.contains("等級重置") || it.norm.contains("等级重置")) && it.box.exactCenterY() < fr.h * 0.5f } }
+        val det = waitFor(8_000) { isReset(it) && button(it, "升級", "升级", yMin = 0.5f) == null } ?: return Result.Fail("找不到等級重置")
+        act.status("妮姬升級：等級重置")
+        val chip = det.lines.first { !it.isWord && (it.norm.contains("等級重置") || it.norm.contains("等级重置")) && it.box.exactCenterY() < det.h * 0.5f }
+        val r = tapUntil(chip, waitMs = 6_000) { button(it, "等級重置", "等级重置", yMin = 0.5f) != null }
+            ?: return Result.Fail("重置視窗沒有打開")
+        tap(button(r, "等級重置", "等级重置", yMin = 0.5f)!!)
+        // 領取獎勵畫面由 handleCommon 點掉
+        waitFor(8_000) { it.find(*CONTINUE) == null && button(it, "等級重置", "等级重置", yMin = 0.5f) == null }
         return Result.Done
     }
 
