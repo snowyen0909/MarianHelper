@@ -67,7 +67,13 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             return "無法進入遊戲大廳，一鍵日常已停止。"
         }
         val report = ArrayList<String>()
-        val tasks = if (only != null) listOf(only) else prefs.dailyOrder.filter { prefs.dailyEnabled(it) }
+        val doneToday = prefs.dailyDoneToday()
+        val all = if (only != null) listOf(only) else prefs.dailyOrder.filter { prefs.dailyEnabled(it) }
+        // 一鍵日常會跳過今天已完成的項目（中斷後接著做）；單項測試一律執行
+        val tasks = if (only != null) all else all.filter { it !in doneToday }
+        if (only == null && tasks.size < all.size) {
+            report += "（接續上次：已跳過今天完成的 ${all.size - tasks.size} 項）"
+        }
         for (task in tasks) {
             act.status("一鍵日常：${task.label}")
             val limit = if (task == DailyTask.TOWER) 20 * 60_000L else 4 * 60_000L
@@ -77,8 +83,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 Result.Fail(e.message ?: "")
             }
             when (r) {
-                is Result.Done -> report += "✓ ${task.label}"
-                is Result.Skip -> report += "－ ${task.label}：${r.why}"
+                is Result.Done -> { report += "✓ ${task.label}"; prefs.markDailyDone(task) }
+                is Result.Skip -> { report += "－ ${task.label}：${r.why}"; prefs.markDailyDone(task) }
                 is Result.Fail -> {
                     report += "✗ ${task.label}：${r.why}"
                     snap("daily_${task.key}")
@@ -180,7 +186,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     private val CONTINUE = arrayOf(
         "點擊領取獎勵", "点击领取奖励", "點擊任意處", "点击任意处", "點擊任意", "点击任意",
-        "點擊進行下一步", "点击进行下一步", "點擊繼續", "点击继续", "TOUCHTOCONTINUE",
+        "點擊進行下一步", "点击进行下一步", "點擊繼續", "点击继续",
         "點擊關閉畫面", "点击关闭画面",
     )
 
@@ -203,6 +209,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     }
 
     private val POPUP_TITLES = arrayOf(
+        "達成PASS任務", "达成PASS任务", "購買PASS", "购买PASS",
         "郵箱", "邮箱", "公告", "通知", "防禦前哨基地", "防御前哨基地", "派遣公告欄", "派遣公告栏",
         "贈送結果", "赠送结果", "今日不再顯示", "今日不再显示",
     )
@@ -280,8 +287,42 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
      * 回到大廳：有「返回」就點旁邊的房子，有視窗就關，畫面一直不動就按返回鍵。
      * launch = true 時，若妮姬不在前景會先打開遊戲。
      */
+    /**
+     * 登入流程：等標題畫面的 TOUCH TO CONTINUE → 點下去進遊戲 → 載入完才開始關彈窗。
+     * 已經在遊戲裡（看到大廳或任何遊戲畫面）就直接略過。
+     */
+    private suspend fun login(timeoutMs: Long): Boolean {
+        act.launchGame()
+        val end = System.currentTimeMillis() + timeoutMs
+        var touched = false
+        while (System.currentTimeMillis() < end) {
+            val f = look()
+            lastFrame = f
+            val touch = f.find("TOUCHTOCONTINUE", "TOUCHTO")
+            when {
+                touch != null -> {
+                    act.status("登入：點擊進入遊戲")
+                    tap(touch)
+                    touched = true
+                    delay(3000)
+                }
+                // 還沒按過 TOUCH 但已經看得到大廳（被遮住也算），表示遊戲早就開著
+                !touched && f.find("方舟", "前哨基地", "作戰出擊", "作战出击", yMin = 0.5f) != null -> return true
+                // 按過 TOUCH：等讀取完，看到大廳的字就交給 toLobby 關彈窗
+                touched && f.find("方舟", "前哨基地", "作戰出擊", "作战出击", yMin = 0.5f) != null -> return true
+                // 其他遊戲內頁面（商店、方舟…）：也交給 toLobby
+                f.find("返回", yMin = 0.85f) != null -> return true
+                else -> {
+                    act.status(if (touched) "登入：讀取中…" else "登入：等待標題畫面")
+                    delay(1500)
+                }
+            }
+        }
+        return false
+    }
+
     private suspend fun toLobby(timeoutMs: Long, launch: Boolean = false): Boolean {
-        if (launch) act.launchGame()
+        if (launch && !login(timeoutMs)) return false
         val end = System.currentTimeMillis() + timeoutMs
         var prev: Bitmap? = null
         var still = 0
@@ -390,8 +431,14 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val wipe = d.find("一舉殲滅", "一举歼灭", yMin = 0.6f)
         if (wipe != null) {
             tap(wipe)
-            val w = waitFor(8_000) { it.has("進行殲滅", "进行歼灭") }
-            if (w != null) {
+            val w = waitFor(8_000) {
+                it.has("進行殲滅", "进行歼灭", "沒有敵人", "没有敌人", "無法", "无法", "次數不足", "次数不足", "已用完")
+            }
+            if (w != null && !w.has("進行殲滅", "进行歼灭")) {
+                // 沒有可殲滅的敵人：關掉提示，算完成
+                (w.exact("確認", "确认", "取消", "關閉", "关闭").firstOrNull())?.let { tap(it) } ?: act.back()
+                note = "目前沒有可殲滅的敵人"
+            } else if (w != null) {
                 val btn = w.find("進行殲滅", "进行歼灭")!!
                 // 要花珠寶時按鈕上會有數字（例如「50 進行殲滅」）
                 val paid = btn.norm.any { it.isDigit() } || w.lines.any { l ->
@@ -419,15 +466,25 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val base = f.lines.firstOrNull {
             !it.isWord && it.norm.contains("前哨基地") && !it.norm.contains("防") && it.box.exactCenterY() > f.h * 0.6f
         } ?: return Result.Fail("找不到前哨基地")
-        val o = tapUntil(base, waitMs = 25_000) { it.find("派遣公告", yMin = 0.75f) != null }
-            ?: return Result.Fail("沒有進入前哨基地")
-        val lb = o.find("派遣公告", yMin = 0.75f)!!
-        var b = tapUntil(lb.box.exactCenterX(), lb.box.exactCenterY() - o.w * 0.06f) {
-            it.find("派遣公告欄", "派遣公告栏", yMax = 0.4f) != null
-        } ?: return Result.Fail("派遣公告欄沒有打開")
+        val inOutpost = { fr: Frame ->
+            fr.find("派遣公告", "指揮中心", "指挥中心", yMin = 0.7f) != null ||
+                (Templates.find(fr.bmp, "dispatch", 0f, 0.8f, 1f, 1f)?.score ?: 0f) >= 0.8f
+        }
+        val o = tapUntil(base, waitMs = 30_000) { inOutpost(it) } ?: return Result.Fail("沒有進入前哨基地")
+        delay(2000)   // 進場鏡頭動畫
+        val isBoard = { fr: Frame -> fr.find("派遣公告欄", "派遣公告栏", "派遣等級", "派遣等级", "派遣目錄", "派遣目录") != null &&
+            fr.find("全部派遣", "全部領取", "全部领取", yMin = 0.6f) != null }
+        val pic = Templates.find(o.bmp, "dispatch", 0f, 0.8f, 1f, 1f)?.takeIf { it.score >= 0.75f }
+        val lb = o.find("派遣公告", yMin = 0.7f)
+        val (bx, by) = when {
+            pic != null -> pic.x to pic.y
+            lb != null -> lb.box.exactCenterX() to lb.box.exactCenterY() - o.w * 0.06f
+            else -> return Result.Fail("找不到派遣公告欄")
+        }
+        var b = tapUntil(bx, by, tries = 4) { isBoard(it) } ?: return Result.Fail("派遣公告欄沒有打開")
         b.find("全部領取", "全部领取", yMin = 0.6f)?.let {
             tap(it)
-            b = waitFor(10_000) { f2 -> f2.find("派遣公告欄", "派遣公告栏", yMax = 0.4f) != null && f2.find(*CONTINUE) == null } ?: b
+            b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null } ?: b
         }
         b.find("全部派遣", yMin = 0.6f)?.let {
             tap(it)
@@ -437,7 +494,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             delay(1500)
         }
         val last = look()
-        last.find("派遣公告欄", "派遣公告栏", yMax = 0.4f)?.let { closePopup(last, it) }
+        last.find("派遣公告欄", "派遣公告栏", "派遣等級", "派遣等级")?.let { closePopup(last, it) }
         return Result.Done
     }
 
@@ -462,8 +519,17 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     /** 付費商店：普通禮包分頁 → 每日 → 每日免費禮包（只點標示「免費」的）。 */
     private suspend fun paidShop(): Result {
         val f = lobby()
-        val btn = f.find("付費商店", "付费商店", yMin = 0.5f) ?: return Result.Fail("找不到付費商店")
-        val s = tapUntil(btn, waitMs = 20_000) { it.find("付費商店", "付费商店", yMax = 0.08f) != null }
+        // 大廳的「付費商店」是藍色藝術字，OCR 常讀不到：先用圖片比對，再用「商店」上方推算
+        val pic = Templates.find(f.bmp, "paid_shop", 0f, 0.6f, 0.55f, 0.85f)?.takeIf { it.score >= 0.7f }
+        val ocr = f.find("付費商店", "付费商店", yMin = 0.5f)
+        val shop = f.exact("商店", yMin = 0.5f).firstOrNull()
+        val (px, py) = when {
+            pic != null -> pic.x to pic.y
+            ocr != null -> ocr.box.exactCenterX() to ocr.box.exactCenterY()
+            shop != null -> shop.box.exactCenterX() - f.w * 0.06f to shop.box.exactCenterY() - f.w * 0.1f
+            else -> return Result.Fail("找不到付費商店")
+        }
+        val s = tapUntil(px, py, waitMs = 20_000) { it.find("付費商店", "付费商店", yMax = 0.08f) != null }
             ?: return Result.Fail("付費商店沒有打開")
         val label = s.find("付費商店", "付费商店", yMax = 0.08f)!!
         // 分頁列沒有文字：「普通禮包」是第 3 個，在「付費商店」標籤下方約 34% 螢幕寬
@@ -517,7 +583,10 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     /** 排序下拉框的文字（遊戲字型的「戰鬥力」常被讀成「戰門力」）。 */
     private fun sortBox(f: Frame): TextLine? =
-        f.find("戰鬥力", "戰門力", "战斗力", "战门力", "戰力", "等級", "等级", yMax = 0.25f)
+        f.lines.firstOrNull { l ->
+            !l.isWord && l.box.exactCenterY() < f.h * 0.3f && l.box.exactCenterX() > f.w * 0.55f &&
+                listOf("戰鬥力", "战斗力", "戰力", "等級", "等级", "好感度", "級別").any { l.norm.contains(it) }
+        }
 
     /** 下拉框右端的箭頭：白色像素重心偏上是 ▼（由高到低），偏下是 ▲（由低到高）。 */
     private fun isAscending(f: Frame, sort: TextLine): Boolean? {
@@ -539,14 +608,20 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     private suspend fun nikkeLevel(): Result {
         val f = lobby()
         val btn = f.exact("妮姬", yMin = 0.9f).firstOrNull() ?: return Result.Fail("找不到妮姬按鈕")
-        val isList = { fr: Frame -> fr.find("圖鑑", "图鉴", "諮詢", "咨询", yMax = 0.12f) != null && sortBox(fr) != null }
+        // 妮姬列表：右上有排序框，上方有「解放／諮詢／圖鑑」其中之一，或「可查看同伴妮姬」說明
+        val isList = { fr: Frame ->
+            sortBox(fr) != null &&
+                fr.find("圖鑑", "图鉴", "諮詢", "咨询", "解放", "可查看同伴", yMax = 0.3f) != null
+        }
         var list = tapUntil(btn, waitMs = 15_000) { isList(it) } ?: return Result.Fail("妮姬列表沒有打開")
         var sort = sortBox(list)!!
 
         if (isAscending(list, sort) != true) {
             // 打開排序面板 → 再點一次已選的「戰鬥力」切換成由低到高 → 關閉面板
             val panel = tapUntil(sort, waitMs = 5_000) { it.has("排序") } ?: return Result.Fail("排序面板沒有打開")
-            val chip = panel.find("戰鬥力", "戰門力", "战斗力", "战门力", yMin = 0.18f)
+            val chip = panel.lines.firstOrNull { l ->
+                !l.isWord && (l.norm == "戰鬥力" || l.norm == "战斗力") && l.box.top > sort.box.bottom
+            }
                 ?: return Result.Fail("找不到戰鬥力排序")
             tap(chip)
             val now = look()

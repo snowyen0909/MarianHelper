@@ -27,8 +27,17 @@ enum class ScreenType(val label: String) {
 
 /** isWord = true 表示單一個字詞（OCR element），false 表示整行。 */
 data class TextLine(val text: String, val box: Rect, val isWord: Boolean = false) {
-    val norm = text.replace(" ", "").uppercase()
+    /** 比對用的文字：去空白、轉大寫，並修正遊戲字型常見的誤讀。 */
+    val norm = fixOcr(text.replace(" ", "").uppercase())
 }
+
+/**
+ * 遊戲字型的「鬥」幾乎都被讀成「門」：戰門、進入戰門、快速戰門、戰門力。
+ * 遊戲裡沒有用到「門」字的按鈕，所以一律換回「鬥」。
+ */
+fun fixOcr(s: String): String = s
+    .replace("戰門", "戰鬥").replace("战门", "战斗").replace("戰鬭", "戰鬥")
+    .replace("戰斗", "戰鬥").replace("战鬥", "战斗")
 
 class ScreenReader {
     private val recognizer =

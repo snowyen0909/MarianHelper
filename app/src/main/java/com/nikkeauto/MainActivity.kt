@@ -39,6 +39,12 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Button
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material.icons.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -104,7 +110,23 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
         onDispose { prefs.unlisten(l) }
     }
 
-    Scaffold(topBar = {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    Scaffold(bottomBar = {
+        NavigationBar {
+            listOf(
+                Triple("推圖", Icons.Filled.Explore, 0),
+                Triple("日常", Icons.Filled.PlaylistPlay, 1),
+                Triple("設定", Icons.Filled.Settings, 2),
+            ).forEach { (label, icon, i) ->
+                NavigationBarItem(
+                    selected = tab == i,
+                    onClick = { tab = i },
+                    icon = { Icon(icon, null) },
+                    label = { Text(label) },
+                )
+            }
+        }
+    }, topBar = {
         TopAppBar(title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("瑪麗安助手")
@@ -117,14 +139,16 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
             }
         })
     }) { pad ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(pad)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+        val scroll = Modifier
+            .fillMaxSize()
+            .padding(pad)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+        when (tab) {
+            // ---------- 推圖 ----------
+            0 -> Column(
+                scroll.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
             // 服務狀態
             Card(
                 colors = CardDefaults.cardColors(
@@ -177,9 +201,6 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                 }
             }
 
-            // 一鍵日常
-            DailyCard(prefs, connected, running)
-
             // 功能開關
             Card(Modifier.fillMaxWidth()) {
                 Text(
@@ -204,6 +225,25 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     prefs.onlyMain) { prefs.onlyMain = it }
             }
 
+            Text(
+                "使用方式：開啟無障礙服務後，遊戲畫面左側會出現懸浮按鈕，進入章節大地圖後點「▶ 開始」。" +
+                    "懸浮按鈕可拖曳。戰鬥失敗時會自動停止並發出通知。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+                Spacer(Modifier.padding(8.dp))
+            }
+
+            // ---------- 日常（清單可拖曳排序，自己捲動） ----------
+            1 -> Column(scroll) {
+                DailyCard(prefs, connected, running, Modifier.weight(1f))
+            }
+
+            // ---------- 設定 ----------
+            else -> Column(
+                scroll.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
             // 懸浮窗
             Card(Modifier.fillMaxWidth()) {
                 Text(
@@ -243,14 +283,10 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                 }
             }
 
-            Text(
-                "使用方式：開啟無障礙服務後，遊戲畫面左側會出現懸浮按鈕，進入章節大地圖後點「▶ 開始」。" +
-                    "懸浮按鈕可拖曳。戰鬥失敗時會自動停止並發出通知。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.padding(8.dp))
+                Spacer(Modifier.padding(8.dp))
+            }
         }
+    }
     }
 }
 
