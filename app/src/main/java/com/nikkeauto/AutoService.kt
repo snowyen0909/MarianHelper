@@ -183,19 +183,22 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     }
 
     /** 一鍵日常：跑完後發通知列出每一項的結果。 */
-    override fun startDaily() {
+    override fun startDaily() = runDaily(null)
+
+    /** only != null 時只跑那一項（App 上的單項測試）。 */
+    fun runDaily(only: DailyTask?) {
         if (loop?.isActive == true) return
         running.value = true
         hudExpanded = false
         loop = scope.launch {
             val summary = try {
-                DailyRunner(prefs, this@AutoService).run()
+                DailyRunner(prefs, this@AutoService).run(only)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 "發生錯誤：${e.message}"
             }
-            notify("一鍵日常完成", summary)
+            notify(if (only != null) "單項測試完成：${only.label}" else "一鍵日常完成", summary)
             main.post {
                 loop = null
                 running.value = false

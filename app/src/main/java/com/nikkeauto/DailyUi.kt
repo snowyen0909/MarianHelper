@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
@@ -58,7 +59,7 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("一鍵日常", style = MaterialTheme.typography.titleSmall, color = cs.primary)
             Text(
-                "依下面的順序跑完勾選的項目，完成後發通知列出結果。失敗的項目會存截圖到相簿的 MarianHelper 資料夾。",
+                "依下面的順序跑完勾選的項目，完成後發通知列出結果。按項目右邊的 ▶ 可以只測試那一項。失敗時會存截圖到相簿的 MarianHelper 資料夾。",
                 style = MaterialTheme.typography.bodySmall,
                 color = cs.onSurfaceVariant,
             )
@@ -107,6 +108,14 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean) {
                             DailyTask.TOWER -> Stepper("每座打", tower, "次", 1, 3) { tower = it; prefs.towerCount = it }
                             else -> {}
                         }
+                    }
+                    // 單項測試：只跑這一項
+                    IconButton(
+                        onClick = { AutoService.instance?.runDaily(t) },
+                        enabled = connected && !running,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(Icons.Filled.PlayCircleOutline, "只測試這一項", tint = cs.primary)
                     }
                     Column {
                         IconButton(onClick = { move(i, -1) }, enabled = i > 0, modifier = Modifier.size(32.dp)) {
