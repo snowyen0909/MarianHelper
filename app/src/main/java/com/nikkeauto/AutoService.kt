@@ -109,18 +109,38 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         // 系統介面（通知欄、輸入法、權限視窗）不算切換 App
-        if (pkg == "com.android.systemui" || pkg.contains("inputmethod") || pkg.contains("keyboard")) return
+        // 系統介面、Google 登入／Play 遊戲橫幅、本 App 自己，都不算離開遊戲
+        if (pkg == "com.android.systemui" || pkg.contains("inputmethod") || pkg.contains("keyboard") ||
+            pkg.startsWith("com.google.android.gms") || pkg.startsWith("com.google.android.play") ||
+            pkg == "com.android.vending" || pkg == packageName || pkg == "android"
+        ) return
         val now = pkg.contains("nikke", ignoreCase = true)
-        if (now != inGame) {
-            inGame = now
-            // HUD 照樣顯示，但離開遊戲時停止腳本，避免在其他 App 上亂點
-            if (!now && running.value) main.post {
-                stopBot()
-                status("已離開遊戲，腳本已停止")
-            }
+        if (now == inGame) return
+        inGame = now
+        if (!now && running.value) {
+            // 離開遊戲 8 秒後還沒回來才停止（遊戲啟動、登入時會短暫切到別的畫面）
+            val stamp = System.currentTimeMillis()
+            leaveStamp = stamp
+            main.postDelayed({
+                if (!inGame && leaveStamp == stamp && running.value && System.currentTimeMillis() > graceUntil) {
+                    stopBot()
+                    status("已離開遊戲，腳本已停止")
+                }
+            }, 8_000)
         }
     }
     override fun onInterrupt() {}
+
+    @Volatile private var leaveStamp = 0L
+    /** 這個時間之前不因「離開遊戲」而停止（剛從 App 啟動遊戲時）。 */
+    @Volatile private var graceUntil = 0L
+
+    /** 從 App 按開始時：先跳到妮姬，給遊戲 90 秒啟動。 */
+    fun jumpToGame() {
+        graceUntil = System.currentTimeMillis() + 90_000
+        inGame = false
+        launchGame()
+    }
 
     // ---------------- 開始 / 停止 ----------------
 

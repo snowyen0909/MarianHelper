@@ -171,7 +171,7 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                         if (!connected) {
                             Button(onClick = openA11y) { Text("前往設定") }
                         } else {
-                            Button(onClick = { AutoService.instance?.toggle() }) {
+                            Button(onClick = { AutoService.instance?.let { if (!running) it.jumpToGame(); it.toggle() } }) {
                                 Icon(if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow, null)
                                 Spacer(Modifier.width(8.dp))
                                 Text(if (running) "停止" else "開始推圖")

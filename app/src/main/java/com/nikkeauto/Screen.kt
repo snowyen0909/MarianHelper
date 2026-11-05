@@ -40,6 +40,7 @@ fun fixOcr(s: String): String = s
     .replace("戰斗", "戰鬥").replace("战鬥", "战斗")
     .replace("戦鬥", "戰鬥").replace("戦門", "戰鬥").replace("戰鬭", "戰鬥").replace("戦", "戰")
     .replace("戰鬥カ", "戰鬥力").replace("戰鬥刀", "戰鬥力")
+    .replace("鬪", "鬥").replace("鬭", "鬥").replace("鬦", "鬥").replace("閗", "鬥")
 
 class ScreenReader {
     private val recognizer =

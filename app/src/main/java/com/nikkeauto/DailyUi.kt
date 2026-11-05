@@ -74,7 +74,7 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean, modifier: Modi
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
-            onClick = { AutoService.instance?.startDaily() },
+            onClick = { AutoService.instance?.let { it.jumpToGame(); it.startDaily() } },
             enabled = connected && !running,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -175,7 +175,7 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean, modifier: Modi
                         }
                         Switch(checked = on, onCheckedChange = { enabled[t] = it; prefs.setDailyEnabled(t, it) })
                         IconButton(
-                            onClick = { AutoService.instance?.runDaily(t) },
+                            onClick = { AutoService.instance?.let { it.jumpToGame(); it.runDaily(t) } },
                             enabled = connected && !running,
                             modifier = Modifier.size(40.dp),
                         ) {
