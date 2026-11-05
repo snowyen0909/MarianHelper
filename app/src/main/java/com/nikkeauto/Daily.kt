@@ -36,7 +36,7 @@ enum class DailyTask(val key: String, val label: String, val desc: String) {
     SHOP("shop", "普通商店", "只拿 0 元的免費物品"),
     NIKKE_LV("nikkelv", "妮姬升級", "最低戰力妮姬升 1 級後等級重置"),
     ARENA("arena", "競技場", "新人競技場，只用免費次數"),
-    TOWER("tower", "無盡之塔", "每座開放的塔，打輸就停止"),
+    TOWER("tower", "無盡之塔", "依星期打開放的企業塔，打輸就停止"),
     MISSION("mission", "每日任務", "全部領取（建議放最後）"),
     ;
 
@@ -798,7 +798,10 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     /** 競技場：有比自己戰力低的就打最低的，沒有就打第三個；只用免費次數。 */
     private suspend fun arena(): Result {
         enterArk("競技場", "竞技场") ?: return Result.Fail("找不到競技場")
-        val a = waitFor(20_000) { it.has("ROOKIE", "新人", "SPECIAL", "CHAMPION") } ?: return Result.Fail("競技場沒有打開")
+        val isMain = { fr: Frame -> fr.has("ROOKIE") && fr.has("SPECIAL") && !fr.has("ROOKIEARENA", "SPECIALARENA") }
+        waitFor(25_000) { isMain(it) } ?: return Result.Fail("競技場沒有打開")
+        delay(2000)   // 卡片進場動畫
+        val a = look()
         // 「ROOKIE」和「SPECIAL」常被讀成同一行，所以用單字的位置；都讀不到就點左半邊
         val rookie = a.lines.firstOrNull { it.isWord && (it.norm.contains("ROOKIE") || it.norm.startsWith("新人")) && it.box.exactCenterX() < a.w * 0.5f }
         val special = a.lines.firstOrNull { it.isWord && it.norm.contains("SPECIAL") }
@@ -809,7 +812,24 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             ?: champ?.let { it.box.exactCenterY() - a.h * 0.12f } ?: (a.h * 0.5f)
         val inRookie = { fr: Frame -> fr.has("ROOKIEARENA", "新人競技場", "新人竞技场") && !fr.has("SPECIALARENA", "特殊競技場", "特殊竞技场") &&
             fr.lines.any { l -> !l.isWord && (l.norm.contains("進入戰") || l.norm.contains("进入战")) } }
-        tapUntil(rx, ry) { inRookie(it) } ?: return Result.Fail("沒有進入新人競技場")
+        var entered = false
+        repeat(3) {
+            if (entered) return@repeat
+            tapAt(rx, ry, precise = false)
+            val r = waitFor(10_000) { inRookie(it) || it.has("SPECIALARENA", "特殊競技場", "特殊竞技场") }
+            when {
+                r == null -> {}
+                inRookie(r) -> entered = true
+                else -> {
+                    // 點進特殊競技場了：按返回回到競技場主畫面再點一次
+                    act.status("競技場：誤入特殊競技場，返回")
+                    r.find("返回", yMin = 0.85f)?.let { tap(it) } ?: act.back()
+                    waitFor(10_000) { isMain(it) }
+                    delay(1500)
+                }
+            }
+        }
+        if (!entered) return Result.Fail("沒有進入新人競技場")
         var done = 0
         val want = prefs.arenaCount
         while (done < want) {
@@ -876,50 +896,84 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         return Result.Done
     }
 
-    /** 無盡之塔：依序打每座 OPEN 的塔，每座最多設定的次數；打輸就停止。 */
+    /** 下方四座企業塔（由左到右），以及開放的星期（Calendar.DAY_OF_WEEK：1=日 … 7=六）。 */
+    private class CorpTower(val name: String, val keys: List<String>, val xFrac: Float, val days: Set<Int>)
+
+    private val CORP_TOWERS = listOf(
+        CorpTower("極樂淨土之塔", listOf("ELYSION", "極樂", "极乐"), 0.155f, setOf(3, 6, 1)),   // 二、五、日
+        CorpTower("米西利斯之塔", listOf("MISSILIS", "米西利斯"), 0.38f, setOf(4, 7, 1)),        // 三、六、日
+        CorpTower("泰特拉之塔", listOf("TETRA", "泰特拉"), 0.61f, setOf(2, 5, 1)),               // 一、四、日
+        CorpTower("朝聖者之塔", listOf("PILGRIM", "朝聖", "朝圣"), 0.84f, setOf(4, 1)),          // 三、日
+    )
+
+    /** 遊戲日的星期（台灣時間，每天 13:00 換日）。 */
+    private fun gameWeekday(): Int {
+        val c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Taipei"))
+        c.add(java.util.Calendar.HOUR_OF_DAY, -13)
+        return c.get(java.util.Calendar.DAY_OF_WEEK)
+    }
+
+    /**
+     * 無盡之塔：只打下方的企業塔（上方的 TRIBE TOWER 不打）。
+     * 依星期決定今天開哪幾座，每座最多打設定的次數（每日上限 3 次，輸了也算），打輸就停止整個項目。
+     */
     private suspend fun tower(): Result {
-        val doneCols = ArrayList<Float>()
+        val today = CORP_TOWERS.filter { gameWeekday() in it.days }
+        if (today.isEmpty()) return Result.Skip("今天沒有開放的企業塔")
         var total = 0
-        repeat(4) {
+        val notes = ArrayList<String>()
+        for (ct in today) {
+            act.status("無盡之塔：${ct.name}")
             enterArk("無限之塔", "无限之塔", "無盡之塔") ?: return Result.Fail("找不到無限之塔")
-            val t = waitFor(20_000) { it.exact("OPEN").isNotEmpty() || it.has("TRIBE") } ?: return Result.Fail("塔列表沒有打開")
-            val open = t.exact("OPEN").sortedBy { it.box.left }
-                .firstOrNull { o -> doneCols.none { kotlin.math.abs(it - o.box.exactCenterX()) < t.w * 0.08f } }
-                ?: return if (total > 0) Result.Done else Result.Skip("今天沒有開放的塔")
-            doneCols += open.box.exactCenterX()
-            tapAt(open.box.exactCenterX(), open.box.exactCenterY() + t.w * 0.25f, precise = false)
-
-            val inside = waitFor(15_000) { it.has("剩餘次數", "剩余次数") } ?: return Result.Fail("進不去塔")
-            val left = inside.lines.firstNotNullOfOrNull { Regex("""(\d)/3""").find(it.norm)?.groupValues?.get(1)?.toIntOrNull() } ?: 3
+            val t = waitFor(25_000) { it.has("TRIBE", "TOWER") && (it.exact("OPEN").isNotEmpty() || it.exact("CLOSE").isNotEmpty()) }
+                ?: return Result.Fail("塔列表沒有打開")
+            delay(1500)   // 進場動畫
+            val list = look()
+            // 用塔名找欄位；讀不到就用固定的欄位位置
+            val label = list.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() > list.h * 0.45f && ct.keys.any { l.norm.contains(it) } }
+            val cx = label?.box?.exactCenterX() ?: (list.w * ct.xFrac)
+            val col = { l: TextLine -> kotlin.math.abs(l.box.exactCenterX() - cx) < list.w * 0.1f }
+            if (list.exact("CLOSE").any(col)) { notes += "${ct.name} 今天沒開"; toLobby(60_000); continue }
+            // 塔的圖示在 OPEN/CLOSE 標籤下方
+            val tag = list.exact("OPEN").firstOrNull(col)
+            val ty = tag?.let { it.box.exactCenterY() + list.w * 0.25f } ?: (list.h * 0.73f)
+            val inside = tapUntil(cx, ty, waitMs = 15_000) { it.has("剩餘次數", "剩余次数") }
+            if (inside == null) { notes += "${ct.name} 進不去"; toLobby(60_000); continue }
+            delay(1500)
+            val left = look().lines.firstNotNullOfOrNull { Regex("""(\d)/3""").find(it.norm)?.groupValues?.get(1)?.toIntOrNull() } ?: 3
             val runs = minOf(prefs.towerCount, left)
-            if (runs <= 0) { toLobby(60_000); return@repeat }
+            if (runs <= 0) { notes += "${ct.name} 今天次數已用完"; toLobby(60_000); continue }
 
-            tapAt(inside.w * 0.5f, inside.h * 0.43f, precise = false)
-            val prep = waitFor(10_000) { it.has("進入戰", "进入战") } ?: return Result.Fail("找不到進入戰鬥")
+            // 點中間的關卡圓盤 → 下方出現關卡資訊與「進入戰鬥」
+            val prep = tapUntil(inside.w * 0.5f, inside.h * 0.42f, waitMs = 8_000) { fr ->
+                fr.lines.any { l -> !l.isWord && (l.norm.contains("進入戰") || l.norm.contains("进入战")) }
+            } ?: return Result.Fail("${ct.name} 找不到進入戰鬥")
             tap(prep.lines.filter { !it.isWord && (it.norm.contains("進入戰") || it.norm.contains("进入战")) }.maxByOrNull { it.box.top }!!)
 
             for (i in 1..runs) {
-                act.status("無盡之塔：第 ${total + 1} 場")
+                act.status("無盡之塔：${ct.name} 第 $i 場")
                 // 結算畫面同時有「下一關卡」和「點擊任意處」，所以這裡不自動處理
                 val end = waitFor(300_000, handle = false) {
-                    it.has("下一關卡", "下一关卡", "FAILED", "點擊任意處", "点击任意处")
-                } ?: return Result.Fail("戰鬥沒有結束")
-                if (end.has("FAILED")) {
-                    end.find("返回")?.let { tap(it) }
-                    return Result.Fail("第 ${total + 1} 場打輸，已停止無盡之塔")
-                }
+                    it.has("下一關卡", "下一关卡", "FAILED", "COMPLETE", "點擊任意處", "点击任意处")
+                } ?: return Result.Fail("${ct.name} 戰鬥沒有結束")
                 total++
+                if (end.has("FAILED")) {
+                    end.find("返回")?.let { tap(it) } ?: act.back()
+                    toLobby(60_000)
+                    return Result.Fail("${ct.name} 第 $i 場打輸，已停止無盡之塔（共打 $total 場）")
+                }
                 val next = end.find("下一關卡", "下一关卡")
                 if (i < runs && next != null) {
                     tap(next)
                 } else {
-                    end.find("點擊任意處", "点击任意处", "點擊進行下一步")?.let { tap(it) } ?: act.back()
+                    end.find("點擊任意處", "点击任意处", "點擊進行下一步")?.let { tap(it) } ?: tapAt(end.w * 0.5f, end.h * 0.6f, precise = false)
                     break
                 }
             }
             toLobby(60_000)
         }
-        return if (total > 0) Result.Done else Result.Skip("沒有可以打的塔")
+        if (total == 0) return Result.Skip(notes.joinToString("、").ifEmpty { "沒有可以打的塔" })
+        return Result.Done
     }
 
     /** 每日任務：點任務列左邊的 ! 圓鈕 → 全部領取。 */
