@@ -56,13 +56,6 @@ app/src/main/java/com/nikkeauto/
   Prefs.kt          開關與參數
 ```
 
-## 發布新版本
-
-1. 修改 `app/build.gradle.kts` 的 `versionCode`、`versionName`，並在下方「版本紀錄」新增 `### v版本號` 段落。
-2. 到 GitHub 的 **Actions → Publish Release → Run workflow**。
-3. 完成後 Releases 會出現新版本，附上固定簽章的 APK。
-
-（需要先在 Settings → Secrets and variables → Actions 設定 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`。）
 
 
 ## 已知限制
