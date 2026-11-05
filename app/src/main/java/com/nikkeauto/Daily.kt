@@ -934,10 +934,33 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val cx = label?.box?.exactCenterX() ?: (list.w * ct.xFrac)
             val col = { l: TextLine -> kotlin.math.abs(l.box.exactCenterX() - cx) < list.w * 0.1f }
             if (list.exact("CLOSE").any(col)) { notes += "${ct.name} 今天沒開"; toLobby(60_000); continue }
-            // 塔的圖示在 OPEN/CLOSE 標籤下方
+            // 依序試：塔的圖示（OPEN 標籤下方）、塔名、「每日通關」那行
             val tag = list.exact("OPEN").firstOrNull(col)
-            val ty = tag?.let { it.box.exactCenterY() + list.w * 0.25f } ?: (list.h * 0.73f)
-            val inside = tapUntil(cx, ty, waitMs = 15_000) { it.has("剩餘次數", "剩余次数") }
+            val daily = list.lines.firstOrNull { l -> !l.isWord && col(l) && (l.norm.contains("每日") || l.norm.contains("通關")) && l.box.exactCenterY() > list.h * 0.6f }
+            val ys = listOfNotNull(
+                tag?.let { it.box.exactCenterY() + list.w * 0.25f },
+                label?.box?.exactCenterY(),
+                daily?.box?.exactCenterY(),
+                list.h * 0.66f,
+            )
+            // 進到塔裡：底部會寫塔名；如果是上方的 TRIBE TOWER（無限之塔），代表點錯了，要退回去
+            val isInside = { fr: Frame -> fr.has("剩餘次數", "剩余次数") || fr.lines.any { l -> l.box.exactCenterY() > fr.h * 0.8f && l.norm.contains("TOWER") } }
+            val isRight = { fr: Frame -> fr.lines.any { l -> l.box.exactCenterY() > fr.h * 0.75f && ct.keys.any { k -> l.norm.contains(k) } } }
+            var inside: Frame? = null
+            for (y in ys) {
+                act.status("無盡之塔：進入 ${ct.name}")
+                tapAt(cx, y, precise = false)
+                val fr = waitFor(12_000) { isInside(it) } ?: continue
+                delay(1500)
+                val now = look()
+                if (isRight(now) || (now.has("剩餘次數", "剩余次数") && !now.has("無限之塔", "无限之塔", "TRIBETOWER"))) { inside = now; break }
+                // 進錯塔（TRIBE TOWER）：按返回回到塔列表再試下一個位置
+                act.status("無盡之塔：進錯塔，返回")
+                now.find("返回", yMin = 0.85f)?.let { tap(it) } ?: act.back()
+                waitFor(15_000) { it.has("TRIBE") && (it.exact("OPEN").isNotEmpty() || it.exact("CLOSE").isNotEmpty()) }
+                delay(1500)
+                if (fr === now) Unit
+            }
             if (inside == null) { notes += "${ct.name} 進不去"; toLobby(60_000); continue }
             delay(1500)
             val left = look().lines.firstNotNullOfOrNull { Regex("""(\d)/3""").find(it.norm)?.groupValues?.get(1)?.toIntOrNull() } ?: 3
