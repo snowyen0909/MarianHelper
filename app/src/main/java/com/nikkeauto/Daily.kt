@@ -223,7 +223,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         f.exact("好友", yMax = 0.3f).firstOrNull { it.box.exactCenterX() in f.w * 0.3f..f.w * 0.7f }
 
     private fun popupTitle(f: Frame): TextLine? =
-        f.find(*POPUP_TITLES, yMax = 0.6f) ?: missionTitle(f) ?: friendTitle(f)
+        f.exact("公告", yMax = 0.6f).minByOrNull { it.box.top }
+            ?: f.find(*POPUP_TITLES, yMax = 0.6f) ?: missionTitle(f) ?: friendTitle(f)
 
     private fun isLobby(f: Frame): Boolean =
         f.find("方舟", yMin = 0.5f) != null &&
@@ -273,13 +274,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             ?.let { Vision.Pt(it.x, it.y) }
 
     /** 點視窗右上角的 X：先猜位置，再找附近的白色叉叉。 */
+    private var closeTries = 0
+    private var closeTitle = ""
+
+    /**
+     * 關掉彈窗：用圖片比對找標題附近（偏上）的 X；找不到、或同一個彈窗試兩次還在，就按返回鍵。
+     * 不再用「猜位置」點，避免點到旁邊的「機率資訊」之類按鈕。
+     */
     private suspend fun closePopup(f: Frame, title: TextLine, dy: Float = 0f) {
-        val gx = f.w * 0.9f
-        val gy = title.box.exactCenterY() + dy
-        val ty = gy / f.h
-        val p = findCloseX(f, 0.6f, (ty - 0.06f).coerceAtLeast(0f), 1f, (ty + 0.06f).coerceAtMost(1f))
-            ?: Vision.whiteCenter(f.bmp, gx, gy, (f.w * 0.07f).toInt()) ?: Vision.Pt(gx, gy)
-        tapAt(p.x, p.y)
+        val ty = (title.box.exactCenterY() + dy) / f.h
+        if (title.norm == closeTitle) closeTries++ else { closeTitle = title.norm; closeTries = 0 }
+        val p = if (closeTries >= 2) null
+        else findCloseX(f, 0.55f, (ty - 0.12f).coerceAtLeast(0f), 1f, (ty + 0.06f).coerceAtMost(1f))
+        if (p != null) tapAt(p.x, p.y) else { act.back(); delay(AFTER_TAP) }
         delay(500)
     }
 
@@ -428,7 +435,14 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         d = waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null } ?: d
 
         var note = ""
-        val wipe = d.find("一舉殲滅", "一举歼灭", yMin = 0.6f)
+        val wipe = d.lines.firstOrNull { l ->
+            !l.isWord && l.box.exactCenterY() > d.h * 0.6f && l.box.exactCenterX() < d.w * 0.5f &&
+                listOf("殲滅", "歼灭", "殲灭", "歼滅", "一舉", "一举", "一擧").any { l.norm.contains(it) }
+        } ?: d.find("獲得獎勵", "获得奖励", yMin = 0.6f)?.let { r ->
+            // 讀不到字：一舉殲滅在「獲得獎勵」左邊
+            TextLine("一舉殲滅", android.graphics.Rect(
+                (r.box.left - d.w * 0.33f).toInt(), r.box.top, (r.box.right - d.w * 0.33f).toInt(), r.box.bottom))
+        }
         if (wipe != null) {
             tap(wipe)
             val w = waitFor(8_000) {
@@ -486,11 +500,23 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             tap(it)
             b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null } ?: b
         }
-        b.find("全部派遣", yMin = 0.6f)?.let {
+        val claim = b.find("全部領取", "全部领取", yMin = 0.6f)
+        val sendAll = b.lines.firstOrNull { l ->
+            !l.isWord && l.box.exactCenterY() > b.h * 0.6f && l.norm.contains("派遣") &&
+                !l.norm.contains("公告") && !l.norm.contains("等級")
+        } ?: claim?.let { c ->
+            TextLine("全部派遣", android.graphics.Rect(
+                (c.box.left - b.w * 0.25f).toInt(), c.box.top, (c.box.right - b.w * 0.25f).toInt(), c.box.bottom))
+        }
+        if (sendAll == null) return Result.Fail("找不到全部派遣")
+        sendAll.let {
             tap(it)
-            // 確認視窗的按鈕就叫「派遣」
-            val c = waitFor(6_000) { f2 -> f2.exact("派遣", yMin = 0.6f).isNotEmpty() }
-            c?.exact("派遣", yMin = 0.6f)?.firstOrNull()?.let { btn -> tap(btn) }
+            // 確認視窗（全部派遣）：按右下的「派遣」
+            val c = waitFor(6_000) { f2 -> f2.find("取消", yMin = 0.6f) != null && f2.lines.any { l ->
+                !l.isWord && l.box.exactCenterY() > f2.h * 0.6f && l.norm.endsWith("派遣") && !l.norm.contains("全部") } }
+            if (c == null) return Result.Skip("沒有可以派遣的項目")
+            c.lines.filter { l -> !l.isWord && l.box.exactCenterY() > c.h * 0.6f && l.norm.endsWith("派遣") && !l.norm.contains("全部") }
+                .maxByOrNull { it.box.right }?.let { btn -> tap(btn) }
             delay(1500)
         }
         val last = look()
@@ -533,9 +559,20 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             ?: return Result.Fail("付費商店沒有打開")
         val label = s.find("付費商店", "付费商店", yMax = 0.08f)!!
         // 分頁列沒有文字：「普通禮包」是第 3 個，在「付費商店」標籤下方約 34% 螢幕寬
-        val g = tapUntil(s.w * 0.335f, label.box.exactCenterY() + s.w * 0.343f, precise = true) {
-            it.has("普通禮包", "普通礼包")
-        } ?: return Result.Fail("找不到普通禮包分頁")
+        val isGift = { fr: Frame -> fr.find("普通禮包", "普通礼包", yMax = 0.3f) != null }
+        val tabY = label.box.exactCenterY() + s.w * 0.335f
+        var g: Frame? = if (isGift(s)) s else null
+        if (g == null) {
+            // 先試圖片比對找到的禮物分頁，再從左到右逐一試
+            val pic = Templates.find(s.bmp, "gift_tab", 0f, (tabY / s.h) - 0.05f, 1f, (tabY / s.h) + 0.05f)
+            val xs = listOfNotNull(pic?.takeIf { it.score >= 0.7f }?.x) + (0 until 7).map { s.w * (0.065f + 0.13f * it) }
+            for (x in xs) {
+                tapAt(x, pic?.y ?: tabY)
+                g = waitFor(4_000) { isGift(it) }
+                if (g != null) break
+            }
+        }
+        if (g == null) return Result.Fail("找不到普通禮包分頁")
         val daily = g.exact("每日", yMax = 0.5f).firstOrNull()
         val d = (if (daily != null) tapUntil(daily) { it.has("每日免費禮包", "每日免费礼包") }
         else waitFor(8_000) { it.has("每日免費禮包", "每日免费礼包") })
@@ -558,18 +595,20 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val btn = f.exact("商店", yMin = 0.5f).firstOrNull() ?: return Result.Fail("找不到商店")
         val isShop = { fr: Frame -> fr.has("普通商店", "可隨時購買", "可随时购买", "距離商品更新", "距离商品更新", "購買全部", "购买全部") }
         val s = tapUntil(btn, waitMs = 20_000) { isShop(it) } ?: return Result.Fail("普通商店沒有打開")
-        val zero = s.exact("0", yMin = 0.2f, yMax = 0.9f).firstOrNull { z ->
-            s.lines.any { l ->
-                !l.isWord && (l.norm.contains("100%") || l.norm.contains("FREE")) &&
-                    kotlin.math.abs(l.box.exactCenterX() - z.box.exactCenterX()) < s.w * 0.12f &&
-                    l.box.exactCenterY() < z.box.exactCenterY() && z.box.exactCenterY() - l.box.exactCenterY() < s.h * 0.06f
-            }
+        // 免費物品卡片上有橘色「100% SALE」標籤；點標籤上方的物品圖
+        val sale = s.lines.firstOrNull { l ->
+            !l.isWord && l.box.exactCenterY() in s.h * 0.2f..s.h * 0.9f &&
+                (l.norm.contains("100%") || l.norm.contains("100%SALE"))
         } ?: return Result.Skip("沒有免費物品（可能已買過）")
-        tap(zero)
+        tapAt(sale.box.exactCenterX(), sale.box.exactCenterY() - s.h * 0.05f, precise = false)
         val d = waitFor(6_000) { it.has("購買道具", "购买道具") } ?: return Result.Skip("已經買過了")
-        val cost = d.find("消耗資金", "消耗资金")
-        val isFree = cost != null && d.lines.any { l ->
-            !l.isWord && l.norm == "0" && kotlin.math.abs(l.box.exactCenterY() - cost.box.exactCenterY()) < d.h * 0.025f
+        val cost = d.find("消耗資金", "消耗资金", "消耗")
+        // 消耗資金那一列：去掉「100%」徽章後，只剩數字 0 才算免費
+        val isFree = cost != null && run {
+            val nums = d.lines.filter { l ->
+                !l.isWord && kotlin.math.abs(l.box.exactCenterY() - cost.box.exactCenterY()) < d.h * 0.03f
+            }.flatMap { l -> Regex("""\d+""").findAll(l.norm.replace("100%", "").replace("消耗資金", "")).map { it.value }.toList() }
+            nums.isNotEmpty() && nums.all { it.toIntOrNull() == 0 }
         }
         if (!isFree) {
             d.exact("取消").firstOrNull()?.let { tap(it) }
@@ -592,16 +631,17 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     private fun isAscending(f: Frame, sort: TextLine): Boolean? {
         val cx = f.w * 0.935f
         val cy = sort.box.exactCenterY()
-        val r = (f.w * 0.025f).toInt()
+        val r = (f.w * 0.03f).toInt()
         val hsv = FloatArray(3)
-        var sy = 0f; var n = 0
+        var sy = 0f; var n = 0; var top = Int.MAX_VALUE; var bot = Int.MIN_VALUE
         for (y in (cy.toInt() - r)..(cy.toInt() + r)) for (x in (cx.toInt() - r)..(cx.toInt() + r)) {
             if (x !in 0 until f.bmp.width || y !in 0 until f.bmp.height) continue
             android.graphics.Color.colorToHSV(f.bmp.getPixel(x, y), hsv)
-            if (hsv[1] < 0.2f && hsv[2] > 0.8f) { sy += y; n++ }
+            if (hsv[1] < 0.2f && hsv[2] > 0.8f) { sy += y; n++; if (y < top) top = y; if (y > bot) bot = y }
         }
-        if (n < 10) return null
-        return sy / n > cy
+        if (n < 10 || bot <= top) return null
+        // ▼ 的白色像素集中在上半部；▲ 集中在下半部（和箭頭自己的上下範圍比，不受文字位置影響）
+        return sy / n > (top + bot) / 2f
     }
 
     /** 妮姬升級：排序改成戰鬥力由低到高 → 第一隻（必須是 LV.1）升 1 級 → 等級重置拿回材料。 */
@@ -618,14 +658,16 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
         if (isAscending(list, sort) != true) {
             // 打開排序面板 → 再點一次已選的「戰鬥力」切換成由低到高 → 關閉面板
-            val panel = tapUntil(sort, waitMs = 5_000) { it.has("排序") } ?: return Result.Fail("排序面板沒有打開")
+            val panel = tapUntil(list.w * 0.935f, sort.box.exactCenterY(), waitMs = 5_000) { it.has("排序") }
+                ?: return Result.Fail("排序面板沒有打開")
             val chip = panel.lines.firstOrNull { l ->
-                !l.isWord && (l.norm == "戰鬥力" || l.norm == "战斗力") && l.box.top > sort.box.bottom
+                !l.isWord && (l.norm.contains("戰鬥力") || l.norm.contains("战斗力")) &&
+                    l.box.top > sort.box.bottom && l.box.exactCenterX() < panel.w * 0.6f
             }
                 ?: return Result.Fail("找不到戰鬥力排序")
             tap(chip)
             val now = look()
-            sortBox(now)?.let { sb -> if (now.has("排序")) tap(sb) }
+            if (now.has("排序")) tapAt(now.w * 0.935f, sort.box.exactCenterY())
             list = waitFor(6_000) { isList(it) && !it.has("排序") } ?: look()
             sort = sortBox(list) ?: return Result.Fail("排序後找不到列表")
             if (isAscending(list, sort) == false) return Result.Skip("無法切換成由低到高，為了安全不升級")
@@ -712,9 +754,17 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val quick = vs.find("快速戰鬥", "快速战斗")!!
             vs.lines.firstOrNull { !it.isWord && it.norm == "OFF" && kotlin.math.abs(it.box.exactCenterY() - quick.box.exactCenterY()) < vs.h * 0.04f }
                 ?.let { tap(it) }
-            val go = look().lines.filter { !it.isWord && (it.norm.contains("進入戰") || it.norm.contains("进入战")) }.maxByOrNull { it.box.top }
+            val now = look()
+            val goLine = now.lines.filter { !it.isWord && (it.norm.contains("進入戰") || it.norm.contains("进入战") || it.norm.contains("進入")) }
+                .maxByOrNull { it.box.top }
+            val q2 = now.find("快速戰鬥", "快速战斗") ?: quick
+            // 讀不到字：「進入戰鬥」是快速戰鬥右邊的藍色大按鈕
+            val go = goLine?.let { Vision.Pt(it.box.exactCenterX(), it.box.exactCenterY()) }
+                ?: Vision.colorCenter(now.bmp, (now.w * 0.45f).toInt(), (q2.box.top - now.h * 0.02f).toInt(),
+                    (now.w * 0.95f).toInt(), (q2.box.bottom + now.h * 0.05f).toInt(), 195f, 225f, 0.5f, 0.5f, 150)
                 ?: return Result.Fail("找不到進入戰鬥")
-            tap(go)
+            act.status("競技場：進入戰鬥")
+            tapAt(go.x, go.y, precise = false)
             // 等勝負畫面，「點擊進行下一步」由 handleCommon 點掉
             waitFor(180_000, handle = false) { it.has("WIN", "DEFEAT", "點擊進行下一步", "点击进行下一步") }
                 ?: return Result.Fail("戰鬥沒有結束")

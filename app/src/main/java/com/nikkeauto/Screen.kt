@@ -38,6 +38,8 @@ data class TextLine(val text: String, val box: Rect, val isWord: Boolean = false
 fun fixOcr(s: String): String = s
     .replace("戰門", "戰鬥").replace("战门", "战斗").replace("戰鬭", "戰鬥")
     .replace("戰斗", "戰鬥").replace("战鬥", "战斗")
+    .replace("戦鬥", "戰鬥").replace("戦門", "戰鬥").replace("戰鬭", "戰鬥").replace("戦", "戰")
+    .replace("戰鬥カ", "戰鬥力").replace("戰鬥刀", "戰鬥力")
 
 class ScreenReader {
     private val recognizer =
