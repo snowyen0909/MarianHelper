@@ -222,14 +222,56 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         f.find("方舟", yMin = 0.5f) != null &&
             f.find("前哨基地", yMin = 0.5f) != null &&
             f.find("作戰出擊", "作战出击", "大廳", "大厅", yMin = 0.5f) != null &&
+            !isDimmed(f) &&
             popupTitle(f) == null &&
             f.find(*CONTINUE) == null
+
+    /**
+     * 大廳是不是被彈窗蓋暗了：看底部「大廳」文字的亮度。
+     * 正常是白字（亮度約 220），被彈窗蓋住會降到 100 以下。
+     */
+    private fun isDimmed(f: Frame): Boolean {
+        val label = f.exact("大廳", "大厅", yMin = 0.9f).firstOrNull()
+        val x0: Int; val y0: Int; val x1: Int; val y1: Int
+        if (label != null) {
+            x0 = label.box.left; y0 = label.box.top; x1 = label.box.right; y1 = label.box.bottom
+        } else {
+            x0 = (f.w * 0.42f).toInt(); y0 = (f.h * 0.955f).toInt(); x1 = (f.w * 0.58f).toInt(); y1 = (f.h * 0.99f).toInt()
+        }
+        val hist = IntArray(256)
+        var n = 0
+        for (y in y0.coerceAtLeast(0) until y1.coerceAtMost(f.bmp.height)) {
+            for (x in x0.coerceAtLeast(0) until x1.coerceAtMost(f.bmp.width)) {
+                val c = f.bmp.getPixel(x, y)
+                val v = maxOf((c shr 16) and 0xff, (c shr 8) and 0xff, c and 0xff)
+                hist[v]++; n++
+            }
+        }
+        if (n == 0) return false
+        // 取第 98 百分位的亮度（文字筆畫最亮的部分）
+        var acc = 0
+        for (v in 255 downTo 0) {
+            acc += hist[v]
+            if (acc >= n * 0.02f) return v < 150
+        }
+        return true
+    }
+
+    /** 用圖片比對找彈窗的 X 鈕。 */
+    private fun findCloseX(f: Frame, x0: Float = 0.5f, y0: Float = 0.03f, x1: Float = 1f, y1: Float = 0.8f): Vision.Pt? =
+        listOf("close_blue", "close_dark")
+            .mapNotNull { Templates.find(f.bmp, it, x0, y0, x1, y1) }
+            .filter { it.score >= 0.8f }
+            .maxByOrNull { it.score }
+            ?.let { Vision.Pt(it.x, it.y) }
 
     /** 點視窗右上角的 X：先猜位置，再找附近的白色叉叉。 */
     private suspend fun closePopup(f: Frame, title: TextLine, dy: Float = 0f) {
         val gx = f.w * 0.9f
         val gy = title.box.exactCenterY() + dy
-        val p = Vision.whiteCenter(f.bmp, gx, gy, (f.w * 0.07f).toInt()) ?: Vision.Pt(gx, gy)
+        val ty = gy / f.h
+        val p = findCloseX(f, 0.6f, (ty - 0.06f).coerceAtLeast(0f), 1f, (ty + 0.06f).coerceAtMost(1f))
+            ?: Vision.whiteCenter(f.bmp, gx, gy, (f.w * 0.07f).toInt()) ?: Vision.Pt(gx, gy)
         tapAt(p.x, p.y)
         delay(500)
     }
@@ -265,11 +307,18 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 still = 0
                 continue
             }
-            // 畫面一直沒變（活動彈窗、不認得的頁面）：按返回鍵
-            val p = prev
-            still = if (p != null && Vision.diff(p, f.bmp) < 0.015f) still + 1 else 0
+            // 不認得的彈窗：用圖片比對找 X
+            val x = findCloseX(f)
+            if (x != null) {
+                act.status("一鍵日常：關閉彈窗")
+                tapAt(x.x, x.y)
+                still = 0
+                continue
+            }
+            // 一段時間沒有任何進展：按返回鍵（載入畫面字很少，那時不按）
             prev = f.bmp
-            if (still >= 3) {
+            if (f.lines.count { !it.isWord } >= 4) still++
+            if (still >= 6) {
                 act.status("一鍵日常：關閉不認得的畫面")
                 act.back()
                 still = 0
@@ -288,8 +337,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val f = look()
             lastFrame = f
             if (isLobby(f)) {
-                val p = prev
-                if (p != null && isLobby(p) && Vision.diff(p.bmp, f.bmp) < 0.02f) return f
+                if (prev != null && isLobby(prev)) return f
             } else if (handleCommon(f)) {
                 prev = null
                 continue
@@ -305,12 +353,15 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     /** 郵件：信封在資源列「150 M」右邊約 18% 螢幕寬。 */
     private suspend fun mail(): Result {
         val f = lobby()
-        val money = f.lines.firstOrNull { l ->
-            !l.isWord && l.box.exactCenterY() < f.h * 0.08f && l.box.exactCenterX() > f.w * 0.5f &&
-                Regex("""\d[\d,.]*\s*[MK]$""").containsMatchIn(l.text.trim())
-        } ?: return Result.Fail("找不到資源列")
-        tapAt(money.box.right + f.w * 0.178f, money.box.exactCenterY())
-        val box = waitFor { it.has("郵箱", "邮箱") } ?: return Result.Fail("郵箱沒有打開")
+        val env = Templates.find(f.bmp, "mail", 0.5f, 0f, 1f, 0.08f)?.takeIf { it.score >= 0.8f }
+        val (ex, ey) = if (env != null) env.x to env.y else {
+            val money = f.lines.firstOrNull { l ->
+                !l.isWord && l.box.exactCenterY() < f.h * 0.08f && l.box.exactCenterX() > f.w * 0.5f &&
+                    Regex("""\d[\d,.]*\s*[MK]$""").containsMatchIn(l.text.trim())
+            } ?: return Result.Fail("找不到信封")
+            money.box.right + f.w * 0.178f to money.box.exactCenterY()
+        }
+        val box = tapUntil(ex, ey, precise = true) { it.has("郵箱", "邮箱") } ?: return Result.Fail("郵箱沒有打開")
         val all = box.find("全部領取", "全部领取", yMin = 0.6f) ?: return Result.Skip("沒有郵件")
         tap(all)
         // 領獎畫面由 handleCommon 點掉，回到郵箱
@@ -325,8 +376,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val label = f.lines.firstOrNull {
             !it.isWord && it.norm.contains("前哨基地") && !it.norm.contains("防") && it.box.exactCenterY() > f.h * 0.6f
         } ?: return Result.Fail("找不到前哨基地")
-        // 「OUTPOST DEFENSE 100%」是藝術字讀不到，用「前哨基地」文字的位置推算
-        var d = tapUntil(label.box.exactCenterX() - f.w * 0.085f, label.box.exactCenterY() + f.w * 0.097f) {
+        // 「OUTPOST DEFENSE 100%」是藝術字讀不到：先用圖片比對，找不到再用「前哨基地」文字位置推算
+        val icon = Templates.find(f.bmp, "defense", 0f, 0.7f, 0.5f, 0.95f)?.takeIf { it.score >= 0.7f }
+        val (dx, dy) = if (icon != null) icon.x to icon.y
+        else label.box.exactCenterX() - f.w * 0.085f to label.box.exactCenterY() + f.w * 0.097f
+        var d = tapUntil(dx, dy) {
             it.has("防禦前哨基地", "防御前哨基地")
         } ?: return Result.Fail("視窗沒有打開")
         d.find("獲得獎勵", "获得奖励", yMin = 0.6f)?.let { tap(it) }
@@ -646,7 +700,9 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val f = lobby()
         val quest = ScreenReader.questLine(f.lines, f.bmp.width, f.bmp.height)
         val event = f.find("EVENT", yMax = 0.15f)
+        val q = Templates.find(f.bmp, "quest", 0.25f, 0f, 0.85f, 0.15f)?.takeIf { it.score >= 0.78f }
         val (x, y) = when {
+            q != null -> q.x to q.y
             quest != null -> quest.box.left - f.w * 0.055f to quest.box.exactCenterY()
             event != null -> event.box.exactCenterX() + f.w * 0.04f to event.box.bottom + f.w * 0.045f
             else -> return Result.Fail("找不到任務列")

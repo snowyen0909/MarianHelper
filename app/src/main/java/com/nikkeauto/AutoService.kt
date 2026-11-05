@@ -69,6 +69,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
         instance = this
         prefs = Prefs(this)
         reader = ScreenReader()
+        Templates.load(assets)
         createChannel()
         showOverlay()
         prefs.listen(prefListener)
