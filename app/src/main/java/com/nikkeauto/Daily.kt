@@ -457,8 +457,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         var d = tapUntil(dx, dy) {
             it.has("防禦前哨基地", "防御前哨基地")
         } ?: return Result.Fail("視窗沒有打開")
-        d.find("獲得獎勵", "获得奖励", yMin = 0.6f)?.let { tap(it) }
-        d = waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null } ?: d
+        delay(1200)   // 視窗動畫
+        repeat(2) {
+            val cur = look()
+            val claim = cur.find("獲得獎勵", "获得奖励", yMin = 0.6f) ?: return@repeat
+            act.status("前哨基地：領取掛機獎勵")
+            tap(claim)
+            val got = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || it.has("REWARD") }
+            if (got != null) {
+                waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null && !it.has("REWARD") }
+                return@repeat
+            }
+        }
+        d = look()
 
         var note = ""
         val wipe = d.lines.firstOrNull { l ->
@@ -543,12 +554,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         sendAll.let {
             tap(it)
             // 確認視窗（全部派遣）：按右下的「派遣」
-            val c = waitFor(6_000) { f2 -> f2.find("取消", yMin = 0.6f) != null && f2.lines.any { l ->
-                !l.isWord && l.box.exactCenterY() > f2.h * 0.6f && l.norm.endsWith("派遣") && !l.norm.contains("全部") } }
+            val c = waitFor(6_000) { f2 -> f2.lines.any { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > f2.h * 0.6f } }
             if (c == null) return Result.Skip("沒有可以派遣的項目")
-            c.lines.filter { l -> !l.isWord && l.box.exactCenterY() > c.h * 0.6f && l.norm.endsWith("派遣") && !l.norm.contains("全部") }
-                .maxByOrNull { it.box.right }?.let { btn -> tap(btn) }
+            act.status("派遣：確認派遣")
+            val btn = c.lines.filter { l -> !l.isWord && l.box.exactCenterY() > c.h * 0.6f && l.norm.endsWith("派遣") && !l.norm.contains("全部") }
+                .maxByOrNull { it.box.right } ?: rightOfCancel(c)
+            if (btn != null) tap(btn)
+            // 確認視窗還在就再按一次
             delay(1500)
+            val again = look()
+            if (again.lines.any { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > again.h * 0.6f }) {
+                rightOfCancel(again)?.let { tap(it) }
+                delay(1500)
+            }
         }
         val last = look()
         last.find("派遣公告欄", "派遣公告栏", "派遣等級", "派遣等级")?.let { closePopup(last, it) }
@@ -770,17 +788,24 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             ?: return Result.Fail("升級視窗沒有打開")
         act.status("妮姬升級：升級 1 次")
         delay(1200)   // 視窗動畫
-        val leveled = { fr: Frame -> fr.lines.any { l -> Regex("""LV\.?2/\d""").containsMatchIn(l.norm) || Regex("""^2>3""").containsMatchIn(l.norm.replace("升級", "")) } }
+        // 視窗上方「升級 1 > 2」那行的數字，按了之後會變；有變就停，不要連按
+        val levelRow = { fr: Frame ->
+            fr.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() < fr.h * 0.5f && l.norm.contains(">") && l.norm.any { it.isDigit() } }
+                ?.norm?.filter { it.isDigit() || it == '>' }
+        }
         var ok = false
         repeat(3) {
             if (ok) return@repeat
             val cur = look()
+            val before = levelRow(cur)
             val b = button(cur, "升級", "升级", yMin = 0.5f) ?: return@repeat
             tap(b)
-            delay(1800)
+            delay(2000)
             val now = look()
-            // 升級成功：視窗裡的等級變成 2 → 3，或視窗已經關掉、詳細頁顯示 LV.2
-            ok = leveled(now) || (button(now, "升級", "升级", yMin = 0.5f) == null)
+            val after = levelRow(now)
+            ok = button(now, "升級", "升级", yMin = 0.5f) == null ||
+                (before != null && after != null && before != after) ||
+                now.lines.any { l -> Regex("""LV\.?2/\d""").containsMatchIn(l.norm) || l.norm.contains("2>3") }
         }
 
         // 關掉升級視窗：點標題「升級」右邊的 X
@@ -998,10 +1023,22 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             if (runs <= 0) { notes += "${ct.name} 今天次數已用完"; toLobby(60_000); continue }
 
             // 點中間的關卡圓盤 → 下方出現關卡資訊與「進入戰鬥」
-            val prep = tapUntil(inside.w * 0.5f, inside.h * 0.42f, waitMs = 8_000) { fr ->
-                fr.lines.any { l -> !l.isWord && (l.norm.contains("進入戰") || l.norm.contains("进入战")) }
-            } ?: return Result.Fail("${ct.name} 找不到進入戰鬥")
-            tap(prep.lines.filter { !it.isWord && (it.norm.contains("進入戰") || it.norm.contains("进入战")) }.maxByOrNull { it.box.top }!!)
+            val isPanel = { fr: Frame ->
+                fr.lines.any { l -> !l.isWord && l.box.exactCenterY() > fr.h * 0.5f &&
+                    (l.norm.contains("進入戰") || l.norm.contains("进入战") || l.norm.contains("STAGE") || l.norm.contains("戰場資訊") || l.norm.contains("殲滅戰")) }
+            }
+            // 面板已經開著就不要再點圓盤（再點會關掉）
+            val prep = (if (isPanel(inside)) inside else tapUntil(inside.w * 0.5f, inside.h * 0.42f, tries = 2, waitMs = 8_000) { isPanel(it) })
+                ?: return Result.Fail("${ct.name} 找不到關卡資訊")
+            delay(1000)
+            val pf = look()
+            val goLine = pf.lines.filter { !it.isWord && (it.norm.contains("進入戰") || it.norm.contains("进入战")) }.maxByOrNull { it.box.top }
+            val go = goLine?.let { Vision.Pt(it.box.exactCenterX(), it.box.exactCenterY()) }
+                ?: Vision.colorCenter(pf.bmp, (pf.w * 0.5f).toInt(), (pf.h * 0.85f).toInt(), (pf.w * 0.98f).toInt(), (pf.h * 0.98f).toInt(), 195f, 225f, 0.5f, 0.5f, 150)
+                ?: Vision.Pt(pf.w * 0.75f, pf.h * 0.92f)
+            act.status("無盡之塔：進入戰鬥")
+            tapAt(go.x, go.y, precise = false)
+            if (prep === pf) Unit
 
             for (i in 1..runs) {
                 act.status("無盡之塔：${ct.name} 第 $i 場")
