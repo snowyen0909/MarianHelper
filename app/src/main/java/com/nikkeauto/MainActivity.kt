@@ -287,7 +287,6 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
             }
         }
     }
-    }
 }
 
 @Composable
