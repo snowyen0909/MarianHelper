@@ -205,6 +205,13 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             f.find("關閉", "关闭")?.let { tap(it); return true }
         }
         f.find(*CONTINUE)?.let { tap(it); delay(600); return true }
+        // 「通知」小視窗（例如：無可獲得的獎勵）→ 按確認
+        if (f.has("無可獲得", "无可获得", "通知")) {
+            f.lines.filter { !it.isWord && (it.norm.endsWith("確認") || it.norm.endsWith("确认")) && it.box.exactCenterY() > f.h * 0.4f }
+                .maxByOrNull { it.box.top }?.let { tap(it); return true }
+        }
+        // 獎勵畫面「點擊領取獎勵」字太淡讀不到：看到 REWARD 就點畫面下方
+        if (f.has("REWARD")) { tapAt(f.w * 0.5f, f.h * 0.75f, precise = false); delay(600); return true }
         return false
     }
 
@@ -458,15 +465,19 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             it.has("防禦前哨基地", "防御前哨基地")
         } ?: return Result.Fail("視窗沒有打開")
         delay(1200)   // 視窗動畫
+        var claimed = false
         repeat(2) {
+            if (claimed) return@repeat
             val cur = look()
             val claim = cur.find("獲得獎勵", "获得奖励", yMin = 0.6f) ?: return@repeat
             act.status("前哨基地：領取掛機獎勵")
             tap(claim)
             val got = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || it.has("REWARD") }
             if (got != null) {
+                claimed = true
                 waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null && !it.has("REWARD") }
-                return@repeat
+            } else if (cur.has("無可獲得", "无可获得") || look().has("無可獲得", "无可获得")) {
+                claimed = true   // 沒有獎勵可領
             }
         }
         d = look()
@@ -480,8 +491,15 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             TextLine("一舉殲滅", android.graphics.Rect(
                 (r.box.left - d.w * 0.33f).toInt(), r.box.top, (r.box.right - d.w * 0.33f).toInt(), r.box.bottom))
         }
-        if (wipe != null) {
-            tap(wipe)
+        val wipePic = Templates.find(d.bmp, "wipe", 0f, 0.6f, 0.6f, 0.95f)?.takeIf { it.score >= 0.75f }
+        if (wipe != null || wipePic != null) {
+            act.status("前哨基地：一舉殲滅")
+            val wx = wipePic?.x ?: wipe!!.box.exactCenterX()
+            val wy = wipePic?.y ?: wipe!!.box.exactCenterY()
+            tapUntil(wx, wy, tries = 3, waitMs = 5_000) { fr ->
+                fr.exact("取消", yMin = 0.5f).isNotEmpty() || fr.lines.any { !it.isWord && (it.norm.contains("進行") || it.norm.contains("进行")) } ||
+                    fr.has("沒有敵人", "没有敌人", "無法", "无法", "次數不足", "次数不足", "已用完")
+            }
             val isGo = { l: TextLine -> !l.isWord && (l.norm.contains("進行") || l.norm.contains("进行")) }
             val w = waitFor(8_000) { fr ->
                 fr.lines.any(isGo) || fr.exact("取消", yMin = 0.6f).isNotEmpty() ||
