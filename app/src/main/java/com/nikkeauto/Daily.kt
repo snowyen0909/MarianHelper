@@ -581,10 +581,31 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             else -> return Result.Fail("找不到派遣公告欄")
         }
         var b = tapUntil(bx, by, tries = 4) { isBoard(it) } ?: return Result.Fail("派遣公告欄沒有打開")
-        b.find("全部領取", "全部领取", yMin = 0.6f)?.let {
-            tap(it)
-            b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null } ?: b
+        // 「全部領取」是下方右邊那顆（藍色），左邊是「全部派遣」。字讀不到時用位置或藍色按鈕找
+        val findClaim = { fr: Frame ->
+            fr.lines.filter { l ->
+                !l.isWord && l.box.exactCenterY() > fr.h * 0.6f && l.box.exactCenterX() > fr.w * 0.5f &&
+                    (l.norm.contains("全部領") || l.norm.contains("全部领") || l.norm.endsWith("領取") || l.norm.endsWith("领取"))
+            }.maxByOrNull { it.box.top }?.let { Vision.Pt(it.box.exactCenterX(), it.box.exactCenterY()) }
+                ?: fr.lines.filter { l -> !l.isWord && l.box.exactCenterY() > fr.h * 0.6f && (l.norm.contains("全部派") || l.norm.contains("全部派遣")) }
+                    .maxByOrNull { it.box.top }?.let { Vision.Pt(it.box.exactCenterX() + fr.w * 0.25f, it.box.exactCenterY()) }
         }
+        // 有任何一列寫著「領取獎勵」，代表有完成的派遣可以領
+        val hasDone = { fr: Frame -> fr.lines.any { l -> !l.isWord && (l.norm.contains("領取獎勵") || l.norm.contains("领取奖励")) && l.box.exactCenterX() > fr.w * 0.5f } }
+        repeat(2) {
+            val cur = look()
+            if (!hasDone(cur) && it > 0) return@repeat
+            val p = findClaim(cur) ?: return@repeat
+            act.status("派遣：全部領取")
+            tapAt(p.x, p.y, precise = false)
+            val rw = waitFor(6_000, handle = false) { fr -> fr.has("REWARD") || fr.find(*CONTINUE) != null }
+            if (rw != null) {
+                dismissReward(rw)
+                b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null && !f2.has("REWARD") } ?: b
+                return@repeat
+            }
+        }
+        b = look()
         val claim = b.find("全部領取", "全部领取", yMin = 0.6f)
         val sendAll = b.lines.filter { l ->
             !l.isWord && l.box.exactCenterY() > b.h * 0.6f && (l.norm.contains("全部派遣") || l.norm.contains("全部派"))
