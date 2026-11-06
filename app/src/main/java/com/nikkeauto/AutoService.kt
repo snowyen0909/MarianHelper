@@ -187,6 +187,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
         running.value = true
         hudExpanded = false   // 開始後收起面板，避免擋住遊戲畫面
         loop = scope.launch {
+            log("開始推圖", important = true)
             status("啟動中…")
             while (isActive) {
                 try {
@@ -204,7 +205,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     }
 
     /** 一鍵日常：跑完後發通知列出每一項的結果。 */
-    override fun startDaily() = runDaily(null)
+    override fun startDaily() { jumpToGame(); runDaily(null) }
 
     /** only != null 時只跑那一項（App 上的單項測試）。 */
     fun runDaily(only: DailyTask?) {
@@ -212,6 +213,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
         running.value = true
         hudExpanded = false
         loop = scope.launch {
+            log(if (only != null) "單項測試：${only.label}" else "開始一鍵日常", important = true)
             val summary = try {
                 DailyRunner(prefs, this@AutoService).run(only)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -313,6 +315,16 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
 
     override fun status(text: String) {
         lastStatus.value = text
+        if (!prefs.logBrief) log(text)
+    }
+
+    /** 寫一行日誌（相同內容連續出現只記一次）。 */
+    fun log(text: String, important: Boolean = false) {
+        if (prefs.logBrief && !important) return
+        val cur = logs.value
+        if (cur.isNotEmpty() && cur.last().text == text) return
+        val max = prefs.logMax.coerceAtLeast(50)
+        logs.value = (cur + LogEntry(System.currentTimeMillis(), text, important)).takeLast(max)
     }
 
     override fun launchGame() {
@@ -331,6 +343,8 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     }
 
     override fun saveDebug(bmp: Bitmap, name: String) {
+        if (!prefs.saveShots) return
+        log("已存失敗截圖：$name")
         try {
             val time = java.text.SimpleDateFormat("MMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
             val values = android.content.ContentValues().apply {
@@ -345,6 +359,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     }
 
     override fun notify(title: String, body: String) {
+        log("【$title】\n$body", important = true)
         val n = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_more)
             .setContentTitle(title)
@@ -356,6 +371,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     }
 
     override fun stopWithAlert(title: String, body: String) {
+        log("【$title】$body", important = true)
         main.post { stopBot(); status(title) }
         val n = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_error)
@@ -410,7 +426,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
 
     override fun toggleExpanded() { hudExpanded = !hudExpanded }
 
-    override fun startStop() = toggle()
+    override fun startStop() { if (!running.value) jumpToGame(); toggle() }
 
     override fun hide() {
         hudExpanded = false
@@ -450,7 +466,12 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
         val connected = MutableStateFlow(false)
         val running = MutableStateFlow(false)
         val lastStatus = MutableStateFlow("待命")
+        /** App 首頁顯示的日誌。 */
+        val logs = MutableStateFlow<List<LogEntry>>(emptyList())
         /** 設定有變動就 +1，讓 HUD 重新讀取開關狀態。 */
         val prefVersion = MutableStateFlow(0)
     }
 }
+
+/** 一行日誌。 */
+data class LogEntry(val time: Long, val text: String, val important: Boolean)

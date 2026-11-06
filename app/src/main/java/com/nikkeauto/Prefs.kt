@@ -86,9 +86,30 @@ class Prefs(context: Context) {
         get() = sp.getInt(K_TOWER, 3)
         set(v) = sp.edit().putInt(K_TOWER, v.coerceIn(1, 3)).apply()
 
+    // ---------- 日誌 ----------
+    /** 失敗時存截圖到相簿。 */
+    var saveShots: Boolean
+        get() = sp.getBoolean("save_shots", true)
+        set(v) = sp.edit().putBoolean("save_shots", v).apply()
+
     var delayMin: Int
         get() = sp.getInt(K_DMIN, 500)
         set(v) = sp.edit().putInt(K_DMIN, v).apply()
+
+    /** 日誌最多保留幾行。 */
+    var logMax: Int
+        get() = sp.getInt(K_LOG_MAX, 300)
+        set(v) = sp.edit().putInt(K_LOG_MAX, v).apply()
+
+    /** 日誌是否顯示時間。 */
+    var logTime: Boolean
+        get() = sp.getBoolean(K_LOG_TIME, true)
+        set(v) = sp.edit().putBoolean(K_LOG_TIME, v).apply()
+
+    /** 日誌只記錄重要事件（開始、完成、失敗），不記錄每一步。 */
+    var logBrief: Boolean
+        get() = sp.getBoolean(K_LOG_BRIEF, false)
+        set(v) = sp.edit().putBoolean(K_LOG_BRIEF, v).apply()
 
     var delayMax: Int
         get() = sp.getInt(K_DMAX, 1200)
@@ -109,5 +130,8 @@ class Prefs(context: Context) {
         private const val K_SHOW_OV = "show_overlay"
         private const val K_OV_GAME = "overlay_only_in_game"
         private const val K_DMAX = "delay_max"
+        private const val K_LOG_MAX = "log_max"
+        private const val K_LOG_TIME = "log_time"
+        private const val K_LOG_BRIEF = "log_brief"
     }
 }

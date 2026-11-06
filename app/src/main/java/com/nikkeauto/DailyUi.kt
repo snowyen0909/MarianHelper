@@ -74,7 +74,7 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean, modifier: Modi
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
-            onClick = { AutoService.instance?.let { it.jumpToGame(); it.startDaily() } },
+            onClick = { AutoService.instance?.startDaily() },
             enabled = connected && !running,
             modifier = Modifier.fillMaxWidth(),
         ) {
