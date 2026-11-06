@@ -91,6 +91,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("intercept_target", 0)
         set(v) = sp.edit().putInt("intercept_target", v).apply()
 
+    /** 攔截戰每天打幾次（1～3）。 */
+    var interceptCount: Int
+        get() = sp.getInt("intercept_count", 3)
+        set(v) = sp.edit().putInt("intercept_count", v.coerceIn(1, 3)).apply()
+
     /** 異常個體 Boss：0 = 目前顯示的，1～5 = 克拉肯、鏡像容器、茵迪維利亞、過激派、死神。 */
     var interceptBoss: Int
         get() = sp.getInt("intercept_boss", 0)

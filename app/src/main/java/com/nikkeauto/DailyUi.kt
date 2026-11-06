@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,6 +68,11 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean, modifier: Modi
     }
     var arena by remember { mutableIntStateOf(prefs.arenaCount) }
     var tower by remember { mutableIntStateOf(prefs.towerCount) }
+    var showIntercept by remember { mutableStateOf(false) }
+    var interceptVer by remember { mutableIntStateOf(0) }
+    if (showIntercept) {
+        InterceptSheet(prefs) { showIntercept = false; interceptVer++ }
+    }
     var doneToday by remember { mutableStateOf(prefs.dailyDoneToday()) }
     androidx.compose.runtime.LaunchedEffect(running) { doneToday = prefs.dailyDoneToday() }
     val cs = MaterialTheme.colorScheme
@@ -173,8 +181,18 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean, modifier: Modi
                             when (t) {
                                 DailyTask.ARENA -> Stepper("每天打", arena, "場", 1, 5) { arena = it; prefs.arenaCount = it }
                                 DailyTask.TOWER -> Stepper("每座打", tower, "次", 1, 3) { tower = it; prefs.towerCount = it }
-                                DailyTask.INTERCEPT -> InterceptOptions(prefs)
+                                DailyTask.INTERCEPT -> Text(
+                                    interceptSummary(prefs, interceptVer),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = cs.primary,
+                                )
                                 else -> {}
+                            }
+                        }
+                        if (t == DailyTask.INTERCEPT) {
+                            // 小齒輪：打開攔截戰設定
+                            IconButton(onClick = { showIntercept = true }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Filled.Settings, "攔截戰設定", tint = cs.onSurfaceVariant)
                             }
                         }
                         Switch(checked = on, onCheckedChange = { enabled[t] = it; prefs.setDailyEnabled(t, it) })
@@ -237,20 +255,54 @@ private fun Stepper(prefix: String, value: Int, unit: String, min: Int, max: Int
 }
 
 
-/** 攔截戰的選項：模式、普通目標、異常個體 Boss。 */
+private val BOSS_NAMES = listOf("目前顯示", "克拉肯", "鏡像容器", "茵迪維利亞", "過激派", "死神")
+private val TARGET_NAMES = listOf("LEVEL D", "LEVEL S", "特殊目標")
+
+/** 清單上顯示的攔截戰設定摘要。ver 只是用來在設定改完後重新讀取。 */
+private fun interceptSummary(prefs: Prefs, @Suppress("UNUSED_PARAMETER") ver: Int): String {
+    val what = if (prefs.interceptMode == 0) "普通・${TARGET_NAMES[prefs.interceptTarget.coerceIn(0, 2)]}"
+    else "異常個體・${BOSS_NAMES[prefs.interceptBoss.coerceIn(0, 5)]}"
+    return "$what・每天 ${prefs.interceptCount} 次"
+}
+
+/** 攔截戰設定頁（從下方滑出）：模式、目標、Boss、次數。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InterceptOptions(prefs: Prefs) {
+private fun InterceptSheet(prefs: Prefs, onClose: () -> Unit) {
     var mode by remember { mutableIntStateOf(prefs.interceptMode) }
     var target by remember { mutableIntStateOf(prefs.interceptTarget) }
     var boss by remember { mutableIntStateOf(prefs.interceptBoss) }
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 4.dp)) {
-        ChipRow(listOf("普通", "異常個體"), mode) { mode = it; prefs.interceptMode = it }
-        if (mode == 0) {
-            ChipRow(listOf("LEVEL D", "LEVEL S", "特殊目標"), target) { target = it; prefs.interceptTarget = it }
-        } else {
-            ChipRow(listOf("目前顯示", "克拉肯", "鏡像容器", "茵迪維利亞", "過激派", "死神"), boss) { boss = it; prefs.interceptBoss = it }
-            Text("異常個體沒解鎖時會自動改打普通（LEVEL D/S 依上次的選擇）",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    var count by remember { mutableIntStateOf(prefs.interceptCount) }
+    val cs = MaterialTheme.colorScheme
+    ModalBottomSheet(onDismissRequest = onClose) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
+        ) {
+            Text("攔截戰設定", style = MaterialTheme.typography.titleLarge)
+
+            Text("要打哪一種", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+            ChipRow(listOf("普通攔截戰", "異常個體攔截戰"), mode) { mode = it; prefs.interceptMode = it }
+
+            if (mode == 0) {
+                Text("普通攔截戰目標", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                ChipRow(TARGET_NAMES, target) { target = it; prefs.interceptTarget = it }
+                Text("特殊目標需要 Lv200。打過一次後才會有快速戰鬥。",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            } else {
+                Text("異常個體 Boss", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                ChipRow(BOSS_NAMES, boss) { boss = it; prefs.interceptBoss = it }
+                Text("「目前顯示」是進去時中間那隻。打過的 Boss 會用每週快速戰鬥。" +
+                    "異常個體沒解鎖時會改打普通攔截戰的 ${TARGET_NAMES[target]}。",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+
+            Text("每天打幾次", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+            Stepper("每天打", count, "次", 1, 3) { count = it; prefs.interceptCount = it }
+            Text("普通和異常個體共用每天 3 次，剩餘次數用完會提早結束。",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+
+            Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("完成") }
         }
     }
 }

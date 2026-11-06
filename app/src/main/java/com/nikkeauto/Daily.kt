@@ -1261,7 +1261,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
         // ---------- 戰鬥：每天共 3 次 ----------
         var fights = 0
-        for (round in 1..3) {
+        for (round in 1..prefs.interceptCount) {
             val p = waitFor(20_000) { isPanel(it) } ?: break
             delay(1000)
             val pf = look()
