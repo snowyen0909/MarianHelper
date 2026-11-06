@@ -1322,6 +1322,12 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val left = interceptLeft(pf)
             if (left == 0) break
             val before = left
+            // 「進入戰鬥」變灰色＝今天次數用完，直接結束
+            val goBtn = pf.lines.filter { l -> !l.isWord && l.box.exactCenterY() > pf.h * 0.8f && (l.norm.contains("進入戰") || l.norm.contains("进入战")) }.maxByOrNull { it.box.top }
+            if (quickEnabled(pf, goBtn?.box?.exactCenterX() ?: (pf.w * 0.75f), goBtn?.box?.exactCenterY() ?: (pf.h * 0.93f)) == false) {
+                act.status("攔截戰：今天的次數已用完")
+                break
+            }
 
             // 1. 先試快速戰鬥（灰色時按了沒反應）
             var done = false
@@ -1363,6 +1369,17 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 ?: return Result.Fail("戰鬥沒有結束")
             fights++
             act.status("攔截戰：第 $fights 次完成")
+            if (before != null && before - 1 <= 0) {
+                // 最後一次打完：點掉結算畫面就結束
+                repeat(6) {
+                    val e = look()
+                    if (isPanel(e)) return@repeat
+                    val c = e.find(*CONTINUE)
+                    if (c != null) tap(c) else tapAt(e.w * 0.5f, e.h * 0.9f, precise = false)
+                    delay(1800)
+                }
+                break
+            }
             if (!isPanel(end)) {
                 repeat(8) {
                     val e = look()
@@ -1372,6 +1389,13 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                     delay(1800)
                 }
             }
+        }
+        // 打完直接按左下的房子回大廳
+        val endF = look()
+        endF.find("返回", yMin = 0.85f)?.let { b ->
+            act.status("攔截戰：回大廳")
+            tapAt(b.box.exactCenterX() + endF.w * 0.14f, b.box.exactCenterY())
+            delay(2000)
         }
         if (fights == 0) return Result.Skip(note.ifEmpty { "今天的攔截次數已用完" })
         return Result.Done
