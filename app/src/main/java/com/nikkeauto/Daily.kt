@@ -914,14 +914,23 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     }
 
     /** 進方舟裡的某個設施（競技場、無限之塔）。 */
-    private suspend fun enterArk(vararg facility: String, arrived: (Frame) -> Boolean): Frame? {
+    private suspend fun enterArk(vararg facility: String, tpl: String? = null, arrived: (Frame) -> Boolean): Frame? {
         val f = lobby()
         val ark = f.find("方舟", yMin = 0.5f) ?: return null
-        val a = tapUntil(ark, waitMs = 25_000) { it.find(*facility, yMin = 0.15f) != null || arrived(it) } ?: return null
+        val pic = { fr: Frame -> tpl?.let { Templates.find(fr.bmp, it, 0f, 0.1f, 1f, 0.95f) }?.takeIf { it.score >= 0.8f } }
+        val a = tapUntil(ark, waitMs = 25_000) { it.find(*facility, yMin = 0.15f) != null || pic(it) != null || arrived(it) } ?: return null
         if (arrived(a)) return a
-        val fac = a.find(*facility, yMin = 0.15f)!!
-        // 設施名稱在卡片下方，點卡片中間比較穩；點一次後耐心等，不要重複點
-        return tapUntil(fac.box.exactCenterX(), fac.box.exactCenterY() - a.w * 0.1f, tries = 2, waitMs = 25_000) { arrived(it) }
+        delay(1200)   // 方舟畫面進場
+        val now = look()
+        // 先用圖片比對找設施卡片，找不到再用名稱文字（名稱在卡片下方，點卡片中間）
+        val p = pic(now)
+        val fac = now.find(*facility, yMin = 0.15f)
+        val (x, y) = when {
+            p != null -> p.x to p.y
+            fac != null -> fac.box.exactCenterX() to fac.box.exactCenterY() - now.w * 0.1f
+            else -> return null
+        }
+        return tapUntil(x, y, tries = 2, waitMs = 25_000) { arrived(it) }
     }
 
     private fun numbers(f: Frame, yFrom: Float, yTo: Float, xMax: Float = Float.MAX_VALUE): List<Pair<Long, TextLine>> =
@@ -1163,6 +1172,46 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     private val BOSSES = listOf("克拉肯", "鏡像容器", "茵迪維利亞", "過激派", "死神")
 
+    /** 快速戰鬥按鈕能不能按：橘色＝能用，灰色＝還不能用；判斷不出來回傳 null。 */
+    private fun quickEnabled(f: Frame, x: Float, y: Float): Boolean? {
+        val hsv = FloatArray(3)
+        var sat = 0; var grey = 0
+        val rx = (f.w * 0.15f).toInt(); val ry = (f.h * 0.012f).toInt()
+        for (yy in (y.toInt() - ry)..(y.toInt() + ry) step 2) for (xx in (x.toInt() - rx)..(x.toInt() + rx) step 3) {
+            if (xx !in 0 until f.bmp.width || yy !in 0 until f.bmp.height) continue
+            android.graphics.Color.colorToHSV(f.bmp.getPixel(xx, yy), hsv)
+            if (hsv[1] > 0.45f && hsv[2] > 0.5f) sat++ else if (hsv[1] < 0.15f && hsv[2] in 0.3f..0.75f) grey++
+        }
+        val n = sat + grey
+        if (n < 20) return null
+        return sat > grey
+    }
+
+    /** 異常個體：依「挑戰」按鈕顏色判斷目前是哪隻（克拉肯橘、鏡像容器藍、過激派紫、死神紅、茵迪維利亞綠）。 */
+    private fun bossByColor(f: Frame): String? {
+        val ch = f.lines.filter { l -> !l.isWord && l.box.exactCenterY() > f.h * 0.6f && (l.norm.contains("挑戰") || l.norm.contains("挑战")) }.maxByOrNull { it.box.top }
+        val cx = ch?.box?.exactCenterX() ?: (f.w * 0.5f)
+        val cy = ch?.box?.exactCenterY() ?: (f.h * 0.775f)
+        val hues = ArrayList<Float>()
+        val hsv = FloatArray(3)
+        for (yy in (cy.toInt() - 12)..(cy.toInt() + 12) step 3) for (xx in (cx.toInt() - 90)..(cx.toInt() + 90) step 4) {
+            if (xx !in 0 until f.bmp.width || yy !in 0 until f.bmp.height) continue
+            android.graphics.Color.colorToHSV(f.bmp.getPixel(xx, yy), hsv)
+            if (hsv[1] > 0.5f && hsv[2] > 0.5f) hues += hsv[0]
+        }
+        if (hues.size < 15) return null
+        hues.sort()
+        val h = hues[hues.size / 2]
+        return when {
+            h < 15f || h >= 340f -> "死神"
+            h < 55f -> "克拉肯"
+            h in 90f..160f -> "茵迪維利亞"
+            h in 190f..245f -> "鏡像容器"
+            h in 255f..330f -> "過激派"
+            else -> null
+        }
+    }
+
     /** 剩餘攔截次數（N/3 的 N）；讀不到回傳 null。 */
     private fun interceptLeft(f: Frame): Int? =
         f.lines.filter { !it.isWord && (it.norm.contains("剩餘攔截") || it.norm.contains("剩余拦截") || it.norm.contains("攔截次數")) }
@@ -1182,7 +1231,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 fr.lines.any { l -> !l.isWord && l.box.exactCenterY() < fr.h * 0.06f && l.box.exactCenterX() < fr.w * 0.35f &&
                     (l.norm.contains("攔截戰") || l.norm.contains("拦截战") || l.norm.contains("異常個體")) }
         }
-        enterArk("攔截戰", "拦截战") { isMap(it) } ?: return Result.Fail("找不到攔截戰")
+        enterArk("攔截戰", "拦截战", tpl = "ark_intercept") { isMap(it) } ?: return Result.Fail("找不到攔截戰")
         delay(2500)   // 地圖進場動畫
         var f = look()
         interceptLeft(f)?.let { if (it == 0) return Result.Skip("今天的攔截次數已用完") }
@@ -1218,7 +1267,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                         if (ok) return@repeat
                         val cur = look()
                         val name = cur.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() in cur.h * 0.55f..cur.h * 0.82f && BOSSES.any { b -> l.norm.contains(b) } }
-                        if (name != null && name.norm.contains(target)) { ok = true; return@repeat }
+                        val curBoss = name?.let { n -> BOSSES.firstOrNull { b -> n.norm.contains(b) } } ?: bossByColor(cur)
+                        if (curBoss == target) { ok = true; return@repeat }
                         val ny = name?.box?.exactCenterY() ?: (cur.h * 0.71f)
                         tapAt(cur.w * 0.8f, ny, precise = false)
                         delay(1500)
@@ -1253,7 +1303,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 else -> listOf("LEVEL D", f.w * 0.19f, f.h * 0.38f, "LEVELD")
             }
             act.status("攔截戰：$name")
-            val p = tapUntil(x as Float, y as Float, waitMs = 10_000) { isPanel(it) } ?: return Result.Fail("$name 面板沒有打開")
+            val tplName = listOf("icpt_level_d", "icpt_level_s", "icpt_special")[prefs.interceptTarget.coerceIn(0, 2)]
+            val card = Templates.find(f.bmp, tplName, 0f, 0.15f, 1f, 0.9f)?.takeIf { it.score >= 0.8f }
+            val tx = card?.x ?: (x as Float)
+            val ty = card?.y ?: (y as Float)
+            val p = tapUntil(tx, ty, waitMs = 10_000) { isPanel(it) } ?: return Result.Fail("$name 面板沒有打開")
             if (!p.lines.any { l -> l.norm.contains(key as String) } && !(key == "特殊目標" && p.has("特殊目标", "SPECIAL"))) {
                 note = listOf(note, "面板標題讀不到 $name，照樣挑戰").filter { it.isNotEmpty() }.joinToString("；")
             }
@@ -1274,12 +1328,15 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val quick = pf.lines.filter { l -> !l.isWord && l.box.exactCenterY() > pf.h * 0.75f && (l.norm.contains("快速戰") || l.norm.contains("快速战")) }.maxByOrNull { it.box.top }
             val qx = quick?.box?.exactCenterX() ?: (pf.w * 0.74f)
             val qy = quick?.box?.exactCenterY() ?: (pf.h * (if (anomaly) 0.86f else 0.895f))
-            act.status("攔截戰：試快速戰鬥（第 $round 次）")
+            val canQuick = quickEnabled(pf, qx, qy)
+            val q = if (canQuick == false) null else run {
+            act.status("攔截戰：快速戰鬥（第 $round 次）")
             tapAt(qx, qy, precise = false)
-            val q = waitFor(6_000, handle = false) { fr ->
+            waitFor(6_000, handle = false) { fr ->
                 fr.has("TOTALDAMAGE", "REWARD") || fr.find(*CONTINUE) != null ||
                     fr.lines.any { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > fr.h * 0.4f } ||
                     (interceptLeft(fr)?.let { before != null && it < before } ?: false)
+            }
             }
             if (q != null) {
                 // 快速戰鬥的確認視窗
