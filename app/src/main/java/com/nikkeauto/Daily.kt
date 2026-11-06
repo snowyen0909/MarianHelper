@@ -37,6 +37,7 @@ enum class DailyTask(val key: String, val label: String, val desc: String) {
     NIKKE_LV("nikkelv", "妮姬升級", "最低戰力妮姬升 1 級後等級重置"),
     ARENA("arena", "競技場", "新人競技場，只用免費次數"),
     TOWER("tower", "無盡之塔", "依星期打開放的企業塔，打輸就停止"),
+    INTERCEPT("intercept", "攔截戰", "每天 3 次；有快速戰鬥就用，沒有就進入戰鬥"),
     MISSION("mission", "每日任務", "全部領取（建議放最後）"),
     ;
 
@@ -76,7 +77,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         }
         for (task in tasks) {
             act.status("一鍵日常：${task.label}")
-            val limit = if (task == DailyTask.TOWER) 20 * 60_000L else 4 * 60_000L
+            val limit = when (task) {
+                DailyTask.TOWER -> 20 * 60_000L
+                DailyTask.INTERCEPT -> 15 * 60_000L
+                else -> 4 * 60_000L
+            }
             val r = try {
                 withTimeoutOrNull(limit) { runTask(task) } ?: Result.Fail("超過時間")
             } catch (e: StopDaily) {
@@ -109,6 +114,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         DailyTask.NIKKE_LV -> nikkeLevel()
         DailyTask.ARENA -> arena()
         DailyTask.TOWER -> tower()
+        DailyTask.INTERCEPT -> intercept()
         DailyTask.MISSION -> mission()
     }
 
@@ -1150,6 +1156,167 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             toLobby(60_000)
         }
         if (total == 0) return Result.Skip(notes.joinToString("、").ifEmpty { "沒有可以打的塔" })
+        return Result.Done
+    }
+
+    // =============== 攔截戰 ===============
+
+    private val BOSSES = listOf("克拉肯", "鏡像容器", "茵迪維利亞", "過激派", "死神")
+
+    /** 剩餘攔截次數（N/3 的 N）；讀不到回傳 null。 */
+    private fun interceptLeft(f: Frame): Int? =
+        f.lines.filter { !it.isWord && (it.norm.contains("剩餘攔截") || it.norm.contains("剩余拦截") || it.norm.contains("攔截次數")) }
+            .firstNotNullOfOrNull { Regex("""(\d)/3""").find(it.norm)?.groupValues?.get(1)?.toIntOrNull() }
+            ?: f.lines.filter { !it.isWord && it.box.exactCenterY() > f.h * 0.8f }
+                .firstNotNullOfOrNull { Regex("""(\d)/3""").find(it.norm)?.groupValues?.get(1)?.toIntOrNull() }
+
+    /**
+     * 攔截戰：方舟 → 攔截戰。
+     * 模式「異常個體」：右下按異常個體攔截戰 → 選 Boss → 挑戰；沒解鎖就改打普通。
+     * 模式「普通」：點 LEVEL D／LEVEL S／特殊目標。
+     * 面板裡：先試快速戰鬥（普通要打過一次、異常個體是每週快速戰鬥），沒反應就進入戰鬥。每天共 3 次。
+     */
+    private suspend fun intercept(): Result {
+        val isMap = { fr: Frame ->
+            fr.has("剩餘攔截次數", "剩余拦截次数") ||
+                fr.lines.any { l -> !l.isWord && l.box.exactCenterY() < fr.h * 0.06f && l.box.exactCenterX() < fr.w * 0.35f &&
+                    (l.norm.contains("攔截戰") || l.norm.contains("拦截战") || l.norm.contains("異常個體")) }
+        }
+        enterArk("攔截戰", "拦截战") { isMap(it) } ?: return Result.Fail("找不到攔截戰")
+        delay(2500)   // 地圖進場動畫
+        var f = look()
+        interceptLeft(f)?.let { if (it == 0) return Result.Skip("今天的攔截次數已用完") }
+
+        val isPanel = { fr: Frame -> fr.lines.any { l -> !l.isWord && l.box.exactCenterY() > fr.h * 0.75f &&
+            (l.norm.contains("模擬戰") || l.norm.contains("模拟战") || l.norm.contains("進入戰") || l.norm.contains("进入战")) } }
+        var note = ""
+
+        // ---------- 異常個體 ----------
+        var anomaly = prefs.interceptMode == 1
+        if (anomaly) {
+            val isBossScreen = { fr: Frame ->
+                fr.lines.any { l -> !l.isWord && l.box.exactCenterY() in fr.h * 0.55f..fr.h * 0.82f &&
+                    (l.norm.contains("挑戰") || l.norm.contains("挑战") || BOSSES.any { b -> l.norm.contains(b) }) }
+            }
+            val btn = f.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() > f.h * 0.88f && l.norm.contains("異常") }
+            val bx = btn?.box?.exactCenterX() ?: (f.w * 0.86f)
+            val by = btn?.let { it.box.exactCenterY() - f.h * 0.03f } ?: (f.h * 0.92f)
+            act.status("攔截戰：異常個體")
+            val boss = tapUntil(bx, by, tries = 2, waitMs = 8_000) { isBossScreen(it) }
+            if (boss == null) {
+                anomaly = false
+                note = "異常個體攔截戰未解鎖，改打普通攔截戰"
+                act.status(note)
+            } else {
+                delay(1500)
+                // 選 Boss：讀中間的名字，不是要的就按右邊箭頭
+                val want = prefs.interceptBoss
+                if (want in 1..BOSSES.size) {
+                    val target = BOSSES[want - 1]
+                    var ok = false
+                    repeat(BOSSES.size + 1) {
+                        if (ok) return@repeat
+                        val cur = look()
+                        val name = cur.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() in cur.h * 0.55f..cur.h * 0.82f && BOSSES.any { b -> l.norm.contains(b) } }
+                        if (name != null && name.norm.contains(target)) { ok = true; return@repeat }
+                        val ny = name?.box?.exactCenterY() ?: (cur.h * 0.71f)
+                        tapAt(cur.w * 0.8f, ny, precise = false)
+                        delay(1500)
+                    }
+                    if (!ok) note = "找不到 $target，打目前顯示的 Boss"
+                }
+                val cur = look()
+                val ch = cur.lines.filter { l -> !l.isWord && l.box.exactCenterY() > cur.h * 0.6f && (l.norm.contains("挑戰") || l.norm.contains("挑战")) }.maxByOrNull { it.box.top }
+                val name = cur.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() in cur.h * 0.55f..cur.h * 0.82f && BOSSES.any { b -> l.norm.contains(b) } }
+                act.status("攔截戰：挑戰 ${name?.text ?: ""}")
+                val cx = ch?.box?.exactCenterX() ?: (cur.w * 0.5f)
+                val cy = ch?.box?.exactCenterY() ?: (name?.box?.exactCenterY()?.plus(cur.h * 0.05f) ?: (cur.h * 0.76f))
+                tapUntil(cx, cy, waitMs = 10_000) { isPanel(it) } ?: return Result.Fail("異常個體面板沒有打開")
+            }
+        }
+
+        // ---------- 普通 ----------
+        if (!anomaly) {
+            f = look()
+            if (!isMap(f)) {
+                // 從異常個體畫面回來：按右下「攔截戰」
+                tapUntil(f.w * 0.69f, f.h * 0.92f, tries = 2, waitMs = 8_000) { isMap(it) && !it.has("挑戰", "挑战") }
+                delay(2000)
+                f = look()
+            }
+            val (name, x, y, key) = when (prefs.interceptTarget) {
+                1 -> listOf("LEVEL S", f.w * 0.83f, f.h * 0.44f, "LEVELS")
+                2 -> {
+                    val sp = f.find("特殊目標攔截戰", "特殊目标拦截战", "特殊目標")
+                    listOf("特殊目標", sp?.box?.exactCenterX() ?: (f.w * 0.6f), sp?.box?.exactCenterY() ?: (f.h * 0.68f), "特殊目標")
+                }
+                else -> listOf("LEVEL D", f.w * 0.19f, f.h * 0.38f, "LEVELD")
+            }
+            act.status("攔截戰：$name")
+            val p = tapUntil(x as Float, y as Float, waitMs = 10_000) { isPanel(it) } ?: return Result.Fail("$name 面板沒有打開")
+            if (!p.lines.any { l -> l.norm.contains(key as String) } && !(key == "特殊目標" && p.has("特殊目标", "SPECIAL"))) {
+                note = listOf(note, "面板標題讀不到 $name，照樣挑戰").filter { it.isNotEmpty() }.joinToString("；")
+            }
+        }
+
+        // ---------- 戰鬥：每天共 3 次 ----------
+        var fights = 0
+        for (round in 1..3) {
+            val p = waitFor(20_000) { isPanel(it) } ?: break
+            delay(1000)
+            val pf = look()
+            val left = interceptLeft(pf)
+            if (left == 0) break
+            val before = left
+
+            // 1. 先試快速戰鬥（灰色時按了沒反應）
+            var done = false
+            val quick = pf.lines.filter { l -> !l.isWord && l.box.exactCenterY() > pf.h * 0.75f && (l.norm.contains("快速戰") || l.norm.contains("快速战")) }.maxByOrNull { it.box.top }
+            val qx = quick?.box?.exactCenterX() ?: (pf.w * 0.74f)
+            val qy = quick?.box?.exactCenterY() ?: (pf.h * (if (anomaly) 0.86f else 0.895f))
+            act.status("攔截戰：試快速戰鬥（第 $round 次）")
+            tapAt(qx, qy, precise = false)
+            val q = waitFor(6_000, handle = false) { fr ->
+                fr.has("TOTALDAMAGE", "REWARD") || fr.find(*CONTINUE) != null ||
+                    fr.lines.any { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > fr.h * 0.4f } ||
+                    (interceptLeft(fr)?.let { before != null && it < before } ?: false)
+            }
+            if (q != null) {
+                // 快速戰鬥的確認視窗
+                if (q.lines.any { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > q.h * 0.4f } && !q.has("REWARD", "TOTALDAMAGE")) {
+                    val okBtn = q.lines.filter { l -> !l.isWord && l.box.exactCenterY() > q.h * 0.4f && (l.norm.endsWith("確認") || l.norm.endsWith("确认") || l.norm.contains("快速戰")) }.maxByOrNull { it.box.right }
+                        ?: rightOfCancel(q)
+                    okBtn?.let { tap(it) }
+                }
+                done = true
+            } else {
+                // 2. 沒有快速戰鬥：進入戰鬥（靠遊戲自動戰鬥）
+                val now = look()
+                val go = now.lines.filter { l -> !l.isWord && l.box.exactCenterY() > now.h * 0.8f && (l.norm.contains("進入戰") || l.norm.contains("进入战")) }.maxByOrNull { it.box.top }
+                act.status("攔截戰：進入戰鬥（第 $round 次）")
+                if (go != null) tap(go) else tapAt(now.w * 0.75f, now.h * 0.93f, precise = false)
+                val started = waitFor(20_000, handle = false) { !isPanel(it) }
+                if (started == null) return if (fights > 0) Result.Done else Result.Fail("按不下進入戰鬥")
+                done = true
+            }
+            if (!done) break
+
+            // 等結算（TOTAL DAMAGE／點擊任意處進行下一步），點到回面板為止
+            val end = waitFor(300_000, handle = false) { fr -> fr.has("TOTALDAMAGE", "REWARD") || fr.find(*CONTINUE) != null || isPanel(fr) }
+                ?: return Result.Fail("戰鬥沒有結束")
+            fights++
+            act.status("攔截戰：第 $fights 次完成")
+            if (!isPanel(end)) {
+                repeat(8) {
+                    val e = look()
+                    if (isPanel(e)) return@repeat
+                    val c = e.find(*CONTINUE)
+                    if (c != null) tap(c) else tapAt(e.w * 0.5f, e.h * 0.9f, precise = false)
+                    delay(1800)
+                }
+            }
+        }
+        if (fights == 0) return Result.Skip(note.ifEmpty { "今天的攔截次數已用完" })
         return Result.Done
     }
 

@@ -81,6 +81,21 @@ class Prefs(context: Context) {
         get() = sp.getInt(K_ARENA, 2)
         set(v) = sp.edit().putInt(K_ARENA, v.coerceIn(1, 5)).apply()
 
+    /** 攔截戰模式：0 = 普通攔截戰，1 = 異常個體攔截戰（沒解鎖時自動改打普通）。 */
+    var interceptMode: Int
+        get() = sp.getInt("intercept_mode", 0)
+        set(v) = sp.edit().putInt("intercept_mode", v).apply()
+
+    /** 普通攔截戰目標：0 = LEVEL D，1 = LEVEL S，2 = 特殊目標。 */
+    var interceptTarget: Int
+        get() = sp.getInt("intercept_target", 0)
+        set(v) = sp.edit().putInt("intercept_target", v).apply()
+
+    /** 異常個體 Boss：0 = 目前顯示的，1～5 = 克拉肯、鏡像容器、茵迪維利亞、過激派、死神。 */
+    var interceptBoss: Int
+        get() = sp.getInt("intercept_boss", 0)
+        set(v) = sp.edit().putInt("intercept_boss", v).apply()
+
     /** 無盡之塔每座打幾次，預設 3（每天上限）。 */
     var towerCount: Int
         get() = sp.getInt(K_TOWER, 3)

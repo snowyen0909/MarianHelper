@@ -2,6 +2,9 @@ package com.nikkeauto
 
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -170,6 +173,7 @@ fun DailyCard(prefs: Prefs, connected: Boolean, running: Boolean, modifier: Modi
                             when (t) {
                                 DailyTask.ARENA -> Stepper("每天打", arena, "場", 1, 5) { arena = it; prefs.arenaCount = it }
                                 DailyTask.TOWER -> Stepper("每座打", tower, "次", 1, 3) { tower = it; prefs.towerCount = it }
+                                DailyTask.INTERCEPT -> InterceptOptions(prefs)
                                 else -> {}
                             }
                         }
@@ -229,5 +233,36 @@ private fun Stepper(prefix: String, value: Int, unit: String, min: Int, max: Int
             Icon(Icons.Filled.Add, "增加", modifier = Modifier.size(18.dp))
         }
         Text(unit, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+
+/** 攔截戰的選項：模式、普通目標、異常個體 Boss。 */
+@Composable
+private fun InterceptOptions(prefs: Prefs) {
+    var mode by remember { mutableIntStateOf(prefs.interceptMode) }
+    var target by remember { mutableIntStateOf(prefs.interceptTarget) }
+    var boss by remember { mutableIntStateOf(prefs.interceptBoss) }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 4.dp)) {
+        ChipRow(listOf("普通", "異常個體"), mode) { mode = it; prefs.interceptMode = it }
+        if (mode == 0) {
+            ChipRow(listOf("LEVEL D", "LEVEL S", "特殊目標"), target) { target = it; prefs.interceptTarget = it }
+        } else {
+            ChipRow(listOf("目前顯示", "克拉肯", "鏡像容器", "茵迪維利亞", "過激派", "死神"), boss) { boss = it; prefs.interceptBoss = it }
+            Text("異常個體沒解鎖時會自動改打普通（LEVEL D/S 依上次的選擇）",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ChipRow(labels: List<String>, selected: Int, onPick: (Int) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        labels.forEachIndexed { i, l ->
+            FilterChip(selected = selected == i, onClick = { onPick(i) }, label = { Text(l) })
+        }
     }
 }
