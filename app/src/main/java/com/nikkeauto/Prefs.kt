@@ -55,11 +55,11 @@ class Prefs(context: Context) {
     fun dailyEnabled(t: DailyTask) = sp.getBoolean("daily_on_${t.key}", true)
     fun setDailyEnabled(t: DailyTask, on: Boolean) = sp.edit().putBoolean("daily_on_${t.key}", on).apply()
 
-    /** 遊戲每天 13:00（台灣時間）重置，以此切日。 */
+    /** 遊戲每天 04:00（台灣時間）重置，以此切日。 */
     private fun gameDay(): String {
         val tz = java.util.TimeZone.getTimeZone("Asia/Taipei")
         val c = java.util.Calendar.getInstance(tz)
-        c.add(java.util.Calendar.HOUR_OF_DAY, -13)
+        c.add(java.util.Calendar.HOUR_OF_DAY, -4)
         return "%04d%02d%02d".format(c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH) + 1, c.get(java.util.Calendar.DAY_OF_MONTH))
     }
 

@@ -213,6 +213,12 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             f.find("關閉", "关闭")?.let { tap(it); return true }
         }
         f.find(*CONTINUE)?.let { tap(it); delay(600); return true }
+        // 只有一顆「確認」、沒有「取消」的提示視窗（道具說明、通知）→ 按確認
+        val ok = f.lines.filter { l -> !l.isWord && l.norm.length <= 4 && (l.norm.endsWith("確認") || l.norm.endsWith("确认")) &&
+            l.box.exactCenterY() in f.h * 0.3f..f.h * 0.85f }.maxByOrNull { it.box.top }
+        if (ok != null && f.lines.none { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > f.h * 0.3f }) {
+            tap(ok); return true
+        }
         // 「通知」小視窗（例如：無可獲得的獎勵）→ 按確認
         if (f.has("無可獲得", "无可获得", "通知")) {
             f.lines.filter { !it.isWord && (it.norm.endsWith("確認") || it.norm.endsWith("确认")) && it.box.exactCenterY() > f.h * 0.4f }
@@ -793,7 +799,12 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             fr.find("等級重置", "等级重置") != null || fr.lines.any { l -> l.norm.contains("升級") && l.norm.contains("LV") } ||
                 fr.has("STATUS", "EQUIPMENT")
         }
-        val isLv1 = { fr: Frame -> fr.lines.any { Regex("""LV\.?1/\d""").containsMatchIn(it.norm) } }
+        val isLv1 = { fr: Frame ->
+            fr.lines.any { l ->
+                Regex("""LV\.?1/\d""").containsMatchIn(l.norm) ||
+                    (l.box.exactCenterY() < fr.h * 0.5f && Regex("""^1/(80|100|120|140|160|180|200)$""").matches(l.norm))
+            }
+        }
 
         // 先切換排序（▼ 變 ▲，等級低的排前面）
         list = toggleSort(list) ?: return Result.Fail("切換排序失敗")
@@ -907,7 +918,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     /** 競技場：有比自己戰力低的就打最低的，沒有就打第三個；只用免費次數。 */
     private suspend fun arena(): Result {
-        val isMain = { fr: Frame -> fr.has("ROOKIE") && fr.has("SPECIAL") && !fr.has("ROOKIEARENA", "SPECIALARENA") }
+        val rookiePic = { fr: Frame -> Templates.find(fr.bmp, "rookie", 0f, 0.35f, 0.6f, 0.75f)?.takeIf { it.score >= 0.8f } }
+        val isMain = { fr: Frame ->
+            !fr.has("ROOKIEARENA", "SPECIALARENA") &&
+                ((fr.has("ROOKIE") && fr.has("SPECIAL")) || rookiePic(fr) != null)
+        }
         enterArk("競技場", "竞技场") { isMain(it) } ?: return Result.Fail("找不到競技場")
         waitFor(25_000) { isMain(it) } ?: return Result.Fail("競技場沒有打開")
         delay(2000)   // 卡片進場動畫
@@ -917,8 +932,9 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val special = a.lines.firstOrNull { it.isWord && it.norm.contains("SPECIAL") }
         val champ = a.lines.firstOrNull { !it.isWord && it.norm.contains("CHAMPION") }
         // 新人競技場一定在左邊那張卡：x 固定在左側 25%，y 用同一列的文字定位
-        val rx = a.w * 0.25f
-        val ry = rookie?.box?.exactCenterY() ?: special?.box?.exactCenterY()
+        val pic = rookiePic(a)
+        val rx = pic?.x ?: (a.w * 0.25f)
+        val ry = pic?.y ?: rookie?.box?.exactCenterY() ?: special?.box?.exactCenterY()
             ?: champ?.let { it.box.exactCenterY() - a.h * 0.12f } ?: (a.h * 0.5f)
         val inRookie = { fr: Frame -> fr.has("ROOKIEARENA", "新人競技場", "新人竞技场") && !fr.has("SPECIALARENA", "特殊競技場", "特殊竞技场") &&
             fr.lines.any { l -> !l.isWord && (l.norm.contains("進入戰") || l.norm.contains("进入战")) } }
@@ -1016,10 +1032,10 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         CorpTower("朝聖者／超標準之塔", listOf("PILGRIM", "OVERSPEC", "朝聖", "朝圣", "超標準"), 0.84f, setOf(4, 1), "tower_pilgrim"),          // 三、日
     )
 
-    /** 遊戲日的星期（台灣時間，每天 13:00 換日）。 */
+    /** 遊戲日的星期（台灣時間，每天 04:00 換日）。 */
     private fun gameWeekday(): Int {
         val c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Taipei"))
-        c.add(java.util.Calendar.HOUR_OF_DAY, -13)
+        c.add(java.util.Calendar.HOUR_OF_DAY, -4)
         return c.get(java.util.Calendar.DAY_OF_WEEK)
     }
 
@@ -1117,7 +1133,9 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 }
                 val next = end.find("下一關卡", "下一关卡")
                 if (i < runs && next != null) {
-                    tap(next)
+                    delay(2000)   // 結算動畫
+                    val gone = tapUntil(next, tries = 3, waitMs = 8_000) { !it.has("下一關卡", "下一关卡") && !it.has("點擊任意處", "点击任意处") }
+                    if (gone == null) return Result.Fail("${ct.name} 按不到下一關卡（打了 $total 場）")
                 } else {
                     end.find("點擊任意處", "点击任意处", "點擊進行下一步")?.let { tap(it) } ?: tapAt(end.w * 0.5f, end.h * 0.6f, precise = false)
                     break
