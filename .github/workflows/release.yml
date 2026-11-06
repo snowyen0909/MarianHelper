@@ -36,6 +36,15 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/marian.jks"
           echo "MH_KEYSTORE=$RUNNER_TEMP/marian.jks" >> "$GITHUB_ENV"
 
+      # 測試版（版號結尾是 b，例如 2.3.0b）不能發布成正式版
+      - name: Check version
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          if [[ "$VER" == *b ]]; then
+            echo "::error::目前是測試版 $VER，請先把 app/build.gradle.kts 的 versionName 改成正式版號（去掉 b）再發布"
+            exit 1
+          fi
+
       - name: Build signed APK
         env:
           MH_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
