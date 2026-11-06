@@ -66,3 +66,9 @@ app/src/main/java/com/nikkeauto/
 - HUD 所在位置的點擊可能會被擋住，必要時把它拖到角落。
 
 ⚠️ 自動化腳本可能違反遊戲服務條款，有封號風險，建議先用小號測試。
+
+## 授權
+
+程式碼以 [GPL-3.0](LICENSE) 授權。遊戲畫面擷取的比對樣本與角色相關圖像不在此範圍內，詳見 [NOTICE.md](NOTICE.md)。
+
+本專案為非官方工具，與 SHIFT UP、Level Infinite 無關。
