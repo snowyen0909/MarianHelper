@@ -1,7 +1,7 @@
 name: Publish Release
 
 # 在 Actions 頁面手動執行：編譯固定簽章的正式版 APK，並發布到 Releases。
-# 版本號取自 app/build.gradle.kts 的 versionName，更新說明取自 README.md 的「### v版本號」段落。
+# 版本號取自 app/build.gradle.kts 的 versionName，更新說明取自 CHANGELOG.md 的「### v版本號」段落。
 on:
   workflow_dispatch:
 
@@ -51,7 +51,7 @@ jobs:
             index($0, v) == 1 { on = 1; next }
             on && /^##/ { exit }
             on { print }
-          ' README.md > out/notes.md
+          ' CHANGELOG.md > out/notes.md
           printf '\n需要 Android 11 以上。第一次從舊版（debug 簽章）換到正式版時，請先解除安裝舊版。\n' >> out/notes.md
           echo "VER=${VER}" >> "$GITHUB_ENV"
 
