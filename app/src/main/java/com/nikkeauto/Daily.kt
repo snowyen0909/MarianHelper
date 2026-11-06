@@ -190,6 +190,14 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         "點擊關閉畫面", "点击关闭画面",
     )
 
+    /** 關閉 REWARD 畫面：點「REWARD」標題那一帶（任何地方都能關，這裡不會有按鈕）。 */
+    private suspend fun dismissReward(f: Frame) {
+        val r = f.find("REWARD")
+        val y = r?.box?.exactCenterY() ?: (f.h * 0.35f)
+        tapAt(f.w * 0.5f, y, precise = false)
+        delay(600)
+    }
+
     /** 各種「點一下就好」的畫面。有處理就回傳 true。 */
     private suspend fun handleCommon(f: Frame): Boolean {
         // 結束遊戲的確認視窗：一律取消
@@ -211,7 +219,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 .maxByOrNull { it.box.top }?.let { tap(it); return true }
         }
         // 獎勵畫面「點擊領取獎勵」字太淡讀不到：看到 REWARD 就點畫面下方
-        if (f.has("REWARD")) { tapAt(f.w * 0.5f, f.h * 0.75f, precise = false); delay(600); return true }
+        if (f.has("REWARD")) { dismissReward(f); return true }
         return false
     }
 
@@ -526,12 +534,28 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                     note = "今天的免費一舉殲滅已用過"
                 } else {
                     tap(btn)
-                    waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null }
+                    // 等獎勵畫面，點掉（點 REWARD 字的位置，不要點下方，以免點到又出現的「進行殲滅」）
+                    val rw = waitFor(8_000, handle = false) { it.has("REWARD") || it.find(*CONTINUE) != null }
+                    if (rw != null) dismissReward(rw)
+                    // 殲滅完遊戲會回到殲滅視窗：按「取消」關掉，絕對不要再按進行殲滅
+                    delay(1200)
+                    repeat(2) {
+                        val fr = look()
+                        val cancel = fr.lines.filter { !it.isWord && it.norm.endsWith("取消") && it.box.exactCenterY() > fr.h * 0.5f }.maxByOrNull { it.box.top }
+                        if (cancel != null) { tap(cancel); delay(800) }
+                        else if (fr.has("REWARD")) dismissReward(fr)
+                    }
                 }
             }
         }
-        val last = look()
-        last.find("防禦前哨基地", "防御前哨基地")?.let { closePopup(last, it) }
+        // 關掉防禦前哨基地視窗：右上角 X（圖片比對），找不到就按返回鍵
+        repeat(2) {
+            val last = look()
+            val t = last.find("防禦前哨基地", "防御前哨基地") ?: return@repeat
+            val ty = t.box.exactCenterY() / last.h
+            val x = findCloseX(last, 0.6f, (ty - 0.06f).coerceAtLeast(0f), 1f, ty + 0.06f)
+            if (x != null) tapAt(x.x, x.y) else { act.back(); delay(AFTER_TAP) }
+        }
         return if (note.isEmpty()) Result.Done else Result.Skip(note)
     }
 
