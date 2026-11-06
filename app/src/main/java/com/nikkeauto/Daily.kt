@@ -192,10 +192,16 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     /** 關閉 REWARD 畫面：點「REWARD」標題那一帶（任何地方都能關，這裡不會有按鈕）。 */
     private suspend fun dismissReward(f: Frame) {
+        // 先點 REWARD 標題那一帶；有些獎勵畫面點那裡沒反應，就改點「點擊領取獎勵」那行字（或物品下方）
         val r = f.find("REWARD")
-        val y = r?.box?.exactCenterY() ?: (f.h * 0.35f)
-        tapAt(f.w * 0.5f, y, precise = false)
-        delay(600)
+        tapAt(f.w * 0.5f, r?.box?.exactCenterY() ?: (f.h * 0.35f), precise = false)
+        delay(900)
+        val now = look()
+        if (!now.has("REWARD") && now.find(*CONTINUE) == null) return
+        val hint = now.find(*CONTINUE)
+        val y = hint?.box?.exactCenterY() ?: ((now.find("REWARD")?.box?.bottom ?: (now.h * 0.4f).toInt()) + now.h * 0.2f)
+        tapAt(now.w * 0.5f, y, precise = false)
+        delay(900)
     }
 
     /** 各種「點一下就好」的畫面。有處理就回傳 true。 */
@@ -400,7 +406,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             // 一段時間沒有任何進展：按返回鍵（載入畫面字很少，那時不按）
             prev = f.bmp
             if (f.lines.count { !it.isWord } >= 4) still++
-            if (still >= 6) {
+            if (still >= 3) {
                 act.status("一鍵日常：關閉不認得的畫面")
                 act.back()
                 still = 0
