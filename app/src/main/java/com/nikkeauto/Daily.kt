@@ -197,17 +197,35 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
     )
 
     /** 關閉 REWARD 畫面：點「REWARD」標題那一帶（任何地方都能關，這裡不會有按鈕）。 */
+    /**
+     * 真正的獎勵畫面：畫面中間有橫的大字「REWARD」（寬度夠大）。
+     * 回歸簽到之類的清單每一列也有直的小字 REWARD，那種不算。
+     */
+    private fun rewardTitle(f: Frame): TextLine? =
+        f.lines.firstOrNull { l ->
+            !l.isWord && l.norm == "REWARD" && l.box.width() > f.w * 0.12f &&
+                l.box.width() > l.box.height() * 2 && l.box.exactCenterY() in f.h * 0.15f..f.h * 0.7f
+        }
+
+    private var rewardTries = 0
+
+    /** 關閉獎勵畫面：依序換位置點（標題、提示字、物品、下方、上方），還關不掉就按返回鍵。 */
     private suspend fun dismissReward(f: Frame) {
-        // 先點 REWARD 標題那一帶；有些獎勵畫面點那裡沒反應，就改點「點擊領取獎勵」那行字（或物品下方）
-        val r = f.find("REWARD")
-        tapAt(f.w * 0.5f, r?.box?.exactCenterY() ?: (f.h * 0.35f), precise = false)
+        val r = rewardTitle(f)
+        val hint = f.find(*CONTINUE)
+        val ry = r?.box?.exactCenterY() ?: (f.h * 0.35f)
+        val spots = listOf(
+            ry,
+            hint?.box?.exactCenterY() ?: (ry + f.h * 0.2f),
+            ry + f.h * 0.1f,
+            f.h * 0.88f,
+            f.h * 0.12f,
+        )
+        val i = rewardTries % (spots.size + 1)
+        rewardTries++
+        if (i == spots.size) act.back() else tapAt(f.w * 0.5f, spots[i], precise = false)
         delay(900)
-        val now = look()
-        if (!now.has("REWARD") && now.find(*CONTINUE) == null) return
-        val hint = now.find(*CONTINUE)
-        val y = hint?.box?.exactCenterY() ?: ((now.find("REWARD")?.box?.bottom ?: (now.h * 0.4f).toInt()) + now.h * 0.2f)
-        tapAt(now.w * 0.5f, y, precise = false)
-        delay(900)
+        if (rewardTitle(look()) == null) rewardTries = 0
     }
 
     /** 各種「點一下就好」的畫面。有處理就回傳 true。 */
@@ -229,7 +247,10 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         if (f.has("感覺怎麼樣", "感觉怎么样")) {
             f.find("關閉", "关闭")?.let { tap(it); return true }
         }
-        f.find(*CONTINUE)?.let { tap(it); delay(600); return true }
+        f.find(*CONTINUE)?.let { c ->
+            if (rewardTitle(f) != null) { dismissReward(f); return true }
+            tap(c); delay(600); return true
+        }
         // 只有一顆「確認」、沒有「取消」的提示視窗（道具說明、通知）→ 按確認
         val ok = f.lines.filter { l -> !l.isWord && l.norm.length <= 4 && (l.norm.endsWith("確認") || l.norm.endsWith("确认")) &&
             l.box.exactCenterY() in f.h * 0.3f..f.h * 0.85f }.maxByOrNull { it.box.top }
@@ -242,9 +263,27 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 .maxByOrNull { it.box.top }?.let { tap(it); return true }
         }
         // 獎勵畫面「點擊領取獎勵」字太淡讀不到：看到 REWARD 就點畫面下方
-        if (f.has("REWARD")) { dismissReward(f); return true }
+        if (rewardTitle(f) != null) { dismissReward(f); return true }
         return false
     }
+
+    /** 回歸活動彈窗：先按全部領取，再關掉。有處理就回傳 true。 */
+    private suspend fun handleReturnEvent(f: Frame): Boolean {
+        if (!f.has("RISEAGAIN", "回歸簽到", "回归签到", "回歸任務", "回歸禮包")) return false
+        val claim = f.lines.filter { l -> !l.isWord && l.box.exactCenterY() > f.h * 0.7f && (l.norm.contains("全部領取") || l.norm.contains("全部领取")) }.maxByOrNull { it.box.top }
+        if (claim != null && !returnClaimed) {
+            act.status("回歸活動：全部領取")
+            returnClaimed = true
+            tap(claim)
+            return true
+        }
+        val x = findCloseX(f, 0.6f, 0.05f, 1f, 0.35f)
+        act.status("回歸活動：關閉")
+        if (x != null) tapAt(x.x, x.y) else { act.back(); delay(AFTER_TAP) }
+        return true
+    }
+
+    private var returnClaimed = false
 
     private val POPUP_TITLES = arrayOf(
         "達成PASS任務", "达成PASS任务", "購買PASS", "购买PASS",
@@ -305,7 +344,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     /** 用圖片比對找彈窗的 X 鈕。 */
     private fun findCloseX(f: Frame, x0: Float = 0.5f, y0: Float = 0.03f, x1: Float = 1f, y1: Float = 0.8f): Vision.Pt? =
-        listOf("close_blue", "close_dark", "close_white")
+        listOf("close_blue", "close_dark", "close_white", "close_banner")
             .mapNotNull { Templates.find(f.bmp, it, x0, y0, x1, y1) }
             .filter { it.score >= 0.8f }
             .maxByOrNull { it.score }
@@ -389,6 +428,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             lastFrame = f
             if (isLobby(f)) return true
             if (handleCommon(f)) { still = 0; continue }
+            if (handleReturnEvent(f)) { still = 0; continue }
 
             // 有返回鍵：點右邊的房子圖示直接回大廳
             val back = f.find("返回", yMin = 0.85f)
@@ -503,17 +543,17 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val claim = cur.find("獲得獎勵", "获得奖励", yMin = 0.6f) ?: return@repeat
             act.status("前哨基地：領取掛機獎勵")
             tap(claim)
-            val got = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || it.has("REWARD") }
+            val got = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || rewardTitle(it) != null }
             if (got != null) {
                 claimed = true
-                waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null && !it.has("REWARD") }
+                waitFor(10_000) { it.has("防禦前哨基地", "防御前哨基地") && it.find(*CONTINUE) == null && rewardTitle(it) == null }
             } else if (cur.has("無可獲得", "无可获得") || look().has("無可獲得", "无可获得")) {
                 claimed = true   // 沒有獎勵可領
             }
         }
         // 領完獎勵後等防禦視窗回來、一舉殲滅按鈕出現（圖片比對）
         d = waitFor(8_000) { fr ->
-            fr.has("防禦前哨基地", "防御前哨基地") && !fr.has("REWARD") && fr.find(*CONTINUE) == null &&
+            fr.has("防禦前哨基地", "防御前哨基地") && rewardTitle(fr) == null && fr.find(*CONTINUE) == null &&
                 (Templates.find(fr.bmp, "wipe", 0f, 0.6f, 0.6f, 0.95f)?.score ?: 0f) >= 0.75f
         } ?: look()
 
@@ -562,7 +602,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 } else {
                     tap(btn)
                     // 等獎勵畫面，點掉（點 REWARD 字的位置，不要點下方，以免點到又出現的「進行殲滅」）
-                    val rw = waitFor(8_000, handle = false) { it.has("REWARD") || it.find(*CONTINUE) != null }
+                    val rw = waitFor(8_000, handle = false) { rewardTitle(it) != null || it.find(*CONTINUE) != null }
                     if (rw != null) dismissReward(rw)
                     // 殲滅完遊戲會回到殲滅視窗：按「取消」關掉，絕對不要再按進行殲滅
                     delay(1200)
@@ -570,7 +610,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                         val fr = look()
                         val cancel = fr.lines.filter { !it.isWord && it.norm.endsWith("取消") && it.box.exactCenterY() > fr.h * 0.5f }.maxByOrNull { it.box.top }
                         if (cancel != null) { tap(cancel); delay(800) }
-                        else if (fr.has("REWARD")) dismissReward(fr)
+                        else if (rewardTitle(fr) != null) dismissReward(fr)
                     }
                 }
             }
@@ -625,10 +665,10 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             val p = findClaim(cur) ?: return@repeat
             act.status("派遣：全部領取")
             tapAt(p.x, p.y, precise = false)
-            val rw = waitFor(6_000, handle = false) { fr -> fr.has("REWARD") || fr.find(*CONTINUE) != null }
+            val rw = waitFor(6_000, handle = false) { fr -> rewardTitle(fr) != null || fr.find(*CONTINUE) != null }
             if (rw != null) {
                 dismissReward(rw)
-                b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null && !f2.has("REWARD") } ?: b
+                b = waitFor(10_000) { f2 -> isBoard(f2) && f2.find(*CONTINUE) == null && rewardTitle(f2) == null } ?: b
                 return@repeat
             }
         }
@@ -1435,16 +1475,16 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             claimed++
             // 先等獎勵畫面真的出現（REWARD／點擊領取獎勵），點掉後再等任務視窗回來；
             // 沒出現獎勵畫面代表這次沒東西可領
-            val rew = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || it.has("REWARD") }
+            val rew = waitFor(6_000, handle = false) { it.find(*CONTINUE) != null || rewardTitle(it) != null }
             if (rew != null) {
                 repeat(4) {
                     val r = look()
-                    if (missionTitle(r) != null && r.find(*CONTINUE) == null && !r.has("REWARD")) return@repeat
+                    if (missionTitle(r) != null && r.find(*CONTINUE) == null && rewardTitle(r) == null) return@repeat
                     r.find(*CONTINUE)?.let { c -> tap(c) } ?: tapAt(r.w * 0.5f, r.h * 0.8f, precise = false)
                     delay(1200)
                 }
             }
-            waitFor(10_000) { missionTitle(it) != null && it.find(*CONTINUE) == null && !it.has("REWARD") }
+            waitFor(10_000) { missionTitle(it) != null && it.find(*CONTINUE) == null && rewardTitle(it) == null }
             act.status("每日任務：等待清單更新")
             delay(2500)   // 讓任務點數和寶箱狀態更新
             cur = look()
