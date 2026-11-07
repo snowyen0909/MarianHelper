@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         val prefs = Prefs(this)
+        Schedule.apply(this)
         setContent {
             val ctx = LocalContext.current
             val scheme = appColorScheme(ctx, isSystemInDarkTheme())
@@ -315,6 +316,7 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                         )
                     }
                 }
+                ScheduleCard(prefs)
                 OutlinedButton(onClick = openA11y, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                     Icon(Icons.Filled.Accessibility, null)
                     Spacer(Modifier.width(8.dp))
@@ -443,4 +445,63 @@ private fun ToggleRow(
             Switch(checked = checked, onCheckedChange = { checked = it; onChange(it) })
         },
     )
+}
+
+
+/** 設定頁：定時自動執行、開始時自動開 HUD。 */
+@Composable
+private fun ScheduleCard(prefs: Prefs) {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(prefs.scheduleOn) }
+    var time by remember { mutableStateOf(Schedule.nextText(prefs)) }
+    var autoHud by remember { mutableStateOf(prefs.autoHud) }
+    val cs = MaterialTheme.colorScheme
+    Card(Modifier.fillMaxWidth()) {
+        Text("自動化", style = MaterialTheme.typography.titleSmall, color = cs.primary,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp))
+        ListItem(
+            leadingContent = { Icon(Icons.Filled.Schedule, null) },
+            headlineContent = { Text("定時自動執行一鍵日常") },
+            supportingContent = { Text(if (on) "每天 $time 自動開始（今天做過的會跳過）" else "關閉") },
+            trailingContent = {
+                Switch(checked = on, onCheckedChange = {
+                    on = it; prefs.scheduleOn = it; Schedule.apply(ctx)
+                    if (it && Build.VERSION.SDK_INT >= 31) {
+                        val am = ctx.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+                        if (!am.canScheduleExactAlarms()) {
+                            ctx.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                android.net.Uri.parse("package:" + ctx.packageName)))
+                        }
+                    }
+                })
+            },
+        )
+        if (on) {
+            Row(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalButton(onClick = {
+                    android.app.TimePickerDialog(ctx, { _, h, m ->
+                        prefs.scheduleHour = h; prefs.scheduleMinute = m
+                        time = Schedule.nextText(prefs); Schedule.apply(ctx)
+                    }, prefs.scheduleHour, prefs.scheduleMinute, true).show()
+                }) {
+                    Icon(Icons.Filled.Schedule, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("時間：$time")
+                }
+            }
+            Text(
+                "到時間會點亮螢幕並打開妮姬。手機需要充電中或電量足夠、無障礙服務保持開啟；" +
+                    "有設定密碼／指紋鎖的話無法自動解鎖，建議改用「無」或滑動解鎖，或讓手機在那個時間保持亮著。",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
+        HorizontalDivider()
+        ListItem(
+            leadingContent = { Icon(Icons.Filled.Visibility, null) },
+            headlineContent = { Text("開始時自動開啟 HUD") },
+            supportingContent = { Text("按開始推圖或一鍵日常時，HUD 關著就自動打開") },
+            trailingContent = { Switch(checked = autoHud, onCheckedChange = { autoHud = it; prefs.autoHud = it }) },
+        )
+    }
 }

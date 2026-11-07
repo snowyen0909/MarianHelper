@@ -217,8 +217,13 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             f.exact("取消").firstOrNull()?.let { tap(it); return true }
         }
         // 限時禮包視窗關閉後的確認
-        if (f.has("關閉視窗後", "关闭视窗后")) {
-            f.find("確認", "确认", yMin = 0.3f)?.let { tap(it); return true }
+        // 限時禮包（FLASH SALE）關閉時會問「商品會移到商店，要關閉嗎？」→ 按確認（右邊那顆）
+        if (f.has("關閉視窗後", "关闭视窗后", "要關閉嗎", "要关闭吗", "移至", "禮包商店", "礼包商店") &&
+            f.lines.any { l -> !l.isWord && l.norm.endsWith("取消") && l.box.exactCenterY() > f.h * 0.3f }
+        ) {
+            val ok = f.lines.filter { l -> !l.isWord && (l.norm.endsWith("確認") || l.norm.endsWith("确认")) && l.box.exactCenterY() > f.h * 0.3f }.maxByOrNull { it.box.right }
+                ?: rightOfCancel(f)
+            if (ok != null) { tap(ok); return true }
         }
         // 評分視窗（操控妮姬的感覺怎麼樣？）
         if (f.has("感覺怎麼樣", "感觉怎么样")) {
@@ -506,7 +511,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 claimed = true   // 沒有獎勵可領
             }
         }
-        d = look()
+        // 領完獎勵後等防禦視窗回來、一舉殲滅按鈕出現（圖片比對）
+        d = waitFor(8_000) { fr ->
+            fr.has("防禦前哨基地", "防御前哨基地") && !fr.has("REWARD") && fr.find(*CONTINUE) == null &&
+                (Templates.find(fr.bmp, "wipe", 0f, 0.6f, 0.6f, 0.95f)?.score ?: 0f) >= 0.75f
+        } ?: look()
 
         var note = ""
         val wipe = d.lines.firstOrNull { l ->

@@ -181,8 +181,30 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
 
     override suspend fun look(): Frame? = snapshot()
 
+    /** 開始時：依設定打開 HUD，並讓螢幕在執行期間保持亮著。 */
+    private fun onStartRun() {
+        if (prefs.autoHud && !prefs.showOverlay) prefs.showOverlay = true
+        setKeepScreenOn(true)
+    }
+
+    private fun setKeepScreenOn(on: Boolean) = main.post {
+        val p = overlayParams ?: return@post
+        val v = overlay ?: return@post
+        p.flags = if (on) p.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        else p.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.inv()
+        try { (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(v, p) } catch (_: Exception) {}
+    }
+
+    /** 定時任務叫醒時：切到妮姬並開始一鍵日常（今天做過的會跳過）。 */
+    fun scheduledStart() {
+        if (loop?.isActive == true) return
+        log("定時任務：開始一鍵日常", important = true)
+        startDaily()
+    }
+
     fun startBot() {
         if (loop?.isActive == true) return
+        onStartRun()
         val bot = Bot(prefs, this)
         running.value = true
         hudExpanded = false   // 開始後收起面板，避免擋住遊戲畫面
@@ -210,6 +232,7 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     /** only != null 時只跑那一項（App 上的單項測試）。 */
     fun runDaily(only: DailyTask?) {
         if (loop?.isActive == true) return
+        onStartRun()
         running.value = true
         hudExpanded = false
         loop = scope.launch {
@@ -225,12 +248,14 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
             main.post {
                 loop = null
                 running.value = false
+                setKeepScreenOn(false)
                 status("一鍵日常完成")
             }
         }
     }
 
     fun stopBot() {
+        setKeepScreenOn(false)
         loop?.cancel()
         loop = null
         running.value = false

@@ -91,6 +91,22 @@ class Prefs(context: Context) {
         get() = sp.getInt("intercept_target", 0)
         set(v) = sp.edit().putInt("intercept_target", v).apply()
 
+    // ---------- 定時與 HUD ----------
+    var scheduleOn: Boolean
+        get() = sp.getBoolean("schedule_on", false)
+        set(v) = sp.edit().putBoolean("schedule_on", v).apply()
+    var scheduleHour: Int
+        get() = sp.getInt("schedule_hour", 4)
+        set(v) = sp.edit().putInt("schedule_hour", v).apply()
+    var scheduleMinute: Int
+        get() = sp.getInt("schedule_minute", 30)
+        set(v) = sp.edit().putInt("schedule_minute", v).apply()
+
+    /** 按開始推圖或一鍵日常時自動打開 HUD。 */
+    var autoHud: Boolean
+        get() = sp.getBoolean("auto_hud", true)
+        set(v) = sp.edit().putBoolean("auto_hud", v).apply()
+
     /** 攔截戰每天打幾次（1～3）。 */
     var interceptCount: Int
         get() = sp.getInt("intercept_count", 3)
