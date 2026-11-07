@@ -305,7 +305,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
 
     /** 用圖片比對找彈窗的 X 鈕。 */
     private fun findCloseX(f: Frame, x0: Float = 0.5f, y0: Float = 0.03f, x1: Float = 1f, y1: Float = 0.8f): Vision.Pt? =
-        listOf("close_blue", "close_dark")
+        listOf("close_blue", "close_dark", "close_white")
             .mapNotNull { Templates.find(f.bmp, it, x0, y0, x1, y1) }
             .filter { it.score >= 0.8f }
             .maxByOrNull { it.score }
