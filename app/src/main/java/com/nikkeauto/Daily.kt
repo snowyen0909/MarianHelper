@@ -1118,38 +1118,22 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         if (today.isEmpty()) return Result.Skip("今天沒有開放的企業塔")
         var total = 0
         val notes = ArrayList<String>()
-        // 塔列表：上方有「可以選擇塔進入」，或看得到下方企業塔的名稱
-        val isList = { fr: Frame ->
-            fr.has("可以選擇塔", "可以选择塔", "選擇塔進入") ||
-                fr.lines.count { l -> l.box.exactCenterY() > fr.h * 0.6f && listOf("ELYSION", "MISSILIS", "TETRA", "PILGRIM").any { k -> l.norm.contains(k) } } >= 2
-        }
-        var onList = false
-        // 打完一座塔：按左下「返回」回到塔列表，接著找下一座，不用回大廳
-        suspend fun backToList() {
-            repeat(4) {
-                val f = look()
-                if (isList(f)) { onList = true; return }
-                act.status("無盡之塔：返回塔列表")
-                f.find("返回", yMin = 0.85f)?.let { tap(it) } ?: act.back()
-                if (waitFor(10_000) { isList(it) } != null) { onList = true; return }
-            }
-            onList = false
-            toLobby(60_000)
-        }
         for (ct in today) {
             act.status("無盡之塔：${ct.name}")
-            if (!onList) {
-                enterArk("無限之塔", "无限之塔", "無盡之塔") { isList(it) } ?: return Result.Fail("找不到無限之塔")
+            // 塔列表：上方有「可以選擇塔進入」，或看得到下方企業塔的名稱
+            val isList = { fr: Frame ->
+                fr.has("可以選擇塔", "可以选择塔", "選擇塔進入") ||
+                    fr.lines.count { l -> l.box.exactCenterY() > fr.h * 0.6f && listOf("ELYSION", "MISSILIS", "TETRA", "PILGRIM").any { k -> l.norm.contains(k) } } >= 2
             }
+            enterArk("無限之塔", "无限之塔", "無盡之塔") { isList(it) } ?: return Result.Fail("找不到無限之塔")
             waitFor(25_000) { isList(it) } ?: return Result.Fail("塔列表沒有打開")
-            onList = false
             delay(1500)   // 進場動畫
             val list = look()
             // 用塔名找欄位；讀不到就用固定的欄位位置
             val label = list.lines.firstOrNull { l -> !l.isWord && l.box.exactCenterY() > list.h * 0.45f && ct.keys.any { l.norm.contains(it) } }
             val cx = label?.box?.exactCenterX() ?: (list.w * ct.xFrac)
             val col = { l: TextLine -> kotlin.math.abs(l.box.exactCenterX() - cx) < list.w * 0.1f }
-            if (list.exact("CLOSE").any(col)) { notes += "${ct.name} 今天沒開"; onList = true; continue }
+            if (list.exact("CLOSE").any(col)) { notes += "${ct.name} 今天沒開"; toLobby(60_000); continue }
             // 塔的圓形徽章（圖片比對，要在這座塔的欄位裡）
             val emblem = Templates.find(list.bmp, ct.tpl, 0f, 0.55f, 1f, 0.85f)
                 ?.takeIf { it.score >= 0.75f && kotlin.math.abs(it.x - list.w * ct.xFrac) < list.w * 0.12f }
@@ -1181,11 +1165,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                 delay(1500)
                 if (fr === now) Unit
             }
-            if (inside == null) { notes += "${ct.name} 進不去"; backToList(); continue }
+            if (inside == null) { notes += "${ct.name} 進不去"; toLobby(60_000); continue }
             delay(1500)
             val left = look().lines.firstNotNullOfOrNull { Regex("""(\d)/3""").find(it.norm)?.groupValues?.get(1)?.toIntOrNull() } ?: 3
             val runs = minOf(prefs.towerCount, left)
-            if (runs <= 0) { notes += "${ct.name} 今天次數已用完"; backToList(); continue }
+            if (runs <= 0) { notes += "${ct.name} 今天次數已用完"; toLobby(60_000); continue }
 
             // 點中間的關卡圓盤 → 下方出現關卡資訊與「進入戰鬥」
             val isPanel = { fr: Frame ->
@@ -1227,10 +1211,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
                     break
                 }
             }
-            delay(2000)   // 結算畫面關掉、回到塔裡
-            backToList()
+            toLobby(60_000)
         }
-        if (onList) toLobby(60_000)
         if (total == 0) return Result.Skip(notes.joinToString("、").ifEmpty { "沒有可以打的塔" })
         return Result.Done
     }
