@@ -54,11 +54,6 @@
 - 商店與一舉殲滅**只拿免費的**，購買前會確認消耗為 0。
 - 攔截戰點清單上的 ⚙️ 小齒輪可設定模式、目標、Boss 與次數。
 
-### ⏰ 定時自動執行
-
-在「設定」頁設定時間，每天時間到會自動喚醒螢幕、打開遊戲跑一鍵日常（需允許精確鬧鐘權限；手機重開機後仍有效）。執行中會保持螢幕亮著。
-
-> 手機若有螢幕密碼，鎖定時無法自動解鎖，建議定時時段不要上鎖或改用滑動解鎖。
 
 ### 🎛️ 懸浮 HUD
 
@@ -111,12 +106,6 @@ app/src/main/java/com/nikkeauto/
 app/src/main/assets/templates/   圖片比對用的樣本圖
 ```
 
-## 自己編譯
-
-1. Fork 這個 repository。
-2. 推送後 Actions 會自動執行「Build APK」（也可以在 Actions 頁手動按 Run workflow）。
-3. 完成後在該次執行頁面最下方的 Artifacts 下載 APK。
-4. 若要固定簽章，在 repository 的 Secrets 設定 `KEYSTORE_BASE64`（keystore 檔的 base64）和 `KEYSTORE_PASSWORD`；沒設定時會產生 debug 版（每次簽章不同，更新要先解除安裝）。
 
 ## 已知限制
 
