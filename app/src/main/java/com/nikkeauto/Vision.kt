@@ -188,6 +188,45 @@ object Vision {
         return n
     }
 
+    /** 小地圖上的怪（粉紅小三角）與 Boss（帶骷髏的大三角）。 */
+    data class MiniMarks(val monsters: List<Pt>, val boss: Pt?)
+
+    /**
+     * 在小地圖（或放大的地圖）範圍內找粉紅三角。
+     * 放大地圖有透視，越下面的三角越大，所以 Boss 用「比同一高度的其他三角大 1.6 倍」判斷；
+     * 附近沒有別的三角時，用絕對大小判斷。只有外框的大三角（EX 等標記）不算。
+     */
+    fun minimapMarks(bmp: Bitmap, box: android.graphics.RectF): MiniMarks {
+        val size = box.width()
+        val x0 = max(0, box.left.toInt()); val x1 = min(bmp.width - 1, box.right.toInt())
+        val y0 = max(0, box.top.toInt()); val y1 = min(bmp.height - 1, box.bottom.toInt())
+        val w = bmp.width
+        val cls = ByteArray(w * bmp.height)
+        val hsv = FloatArray(3)
+        for (y in y0..y1) for (x in x0..x1) {
+            // 四個角的按鈕（放大鏡、X、寶箱計數）不看
+            val fx = (x - box.left) / size; val fy = (y - box.top) / size
+            if (fy < 0.12f && (fx < 0.15f || fx > 0.85f)) continue
+            if (fy > 0.88f && fx > 0.7f) continue
+            android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
+            if ((hsv[0] >= 285f || hsv[0] <= 15f) && hsv[1] >= 0.25f && hsv[2] >= 0.55f) cls[y * w + x] = M_RED
+        }
+        val all = blobs(cls, w, bmp.height, M_RED, minArea = 15)
+        // 只有外框的大三角，和被它包住的小塊（例如「!」）都不算
+        val outlines = all.filter { it.fill < 0.25f && it.w > size * 0.06f }
+        val tri = all.filter { b ->
+            b.fill >= 0.25f && b.w >= 6 && b.h >= 4 &&
+                outlines.none { o -> o !== b && b.cx in o.l.toFloat()..o.r.toFloat() && b.cy in o.t.toFloat()..o.b.toFloat() }
+        }
+        var boss: Blob? = null
+        for (b in tri) {
+            val near = tri.filter { it !== b && abs(it.cy - b.cy) < size * 0.1f }.map { it.w }.sorted()
+            val big = if (near.isNotEmpty()) b.w >= near[near.size / 2] * 1.6f else b.w >= size * 0.075f
+            if (big && (boss == null || b.w > boss.w)) boss = b
+        }
+        return MiniMarks(tri.filter { it !== boss }.map { Pt(it.cx, it.cy) }, boss?.let { Pt(it.cx, it.cy) })
+    }
+
     /** 右下角區域編號上方的紅色「HARD」標籤。 */
     fun hardLabel(bmp: Bitmap): Boolean {
         val w = bmp.width; val h = bmp.height

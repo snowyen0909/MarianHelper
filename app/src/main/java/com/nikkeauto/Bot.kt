@@ -54,6 +54,13 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var lastArea: Int? = null
     private var chapterOpenTries = 0
     private var chapterListLooks = 0
+    /** 從小地圖讀到的怪的方向（單位向量），往這個方向移動畫面找怪。 */
+    private var hardDir: Vision.Pt? = null
+    private var hardSwipes = 0
+    /** 這一輪已經打開過小地圖／放大過。 */
+    private var hardMapOpened = false
+    private var hardEnlarged = false
+    private var hardMapReads = 0
 
     suspend fun step(bmp: Bitmap, lines: List<TextLine>) {
         val w = bmp.width.toFloat()
@@ -220,7 +227,12 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 val counter = ScreenReader.minimapCounter(lines, bmp.width, bmp.height)
                 val prev = lastCounter
                 lastCounter = counter?.box
-                if (counter != null && minimapTries < 4) {
+                // 放大地圖開著時畫面變暗，讀不到 HARD 標籤，沿用上一次的判斷
+                val bigMap = counter != null && counter.box.exactCenterX() > w * 0.6f
+                if (!bigMap) hardMode = Vision.hardLabel(bmp) ||
+                    lines.any { it.norm.contains("HARD") && it.norm.length <= 6 && it.box.exactCenterY() > h * 0.85f && it.box.exactCenterX() > w * 0.55f }
+                // 困難模式要用小地圖找怪，不自動關小地圖
+                if (counter != null && minimapTries < 4 && !hardMode) {
                     // 計數要連續兩張出現在同一個位置，代表小地圖已經穩定
                     val stable = prev != null &&
                         kotlin.math.abs(prev.centerX() - counter.box.centerX()) < 15 &&
@@ -240,8 +252,6 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 }
 
                 val area = ScreenReader.currentArea(lines, bmp.width, bmp.height)
-                hardMode = Vision.hardLabel(bmp) ||
-                    lines.any { it.norm.contains("HARD") && it.norm.length <= 6 && it.box.exactCenterY() > h * 0.85f && it.box.exactCenterX() > w * 0.55f }
                 if (hardMode) {
                     // 困難模式沒有指引，任務欄是普通模式的任務，不能點
                     val done = hardNext
@@ -354,6 +364,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
         val topCut = quest?.let { it.box.bottom + it.box.height() * 0.8f } ?: (h * 0.13f)
         val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box) })
+        // 放大的地圖開著：讀完方向就關掉
+        if (counter != null && counter.box.exactCenterX() > w * 0.6f) {
+            readMinimap(bmp, counter, big = true)
+            return
+        }
         val scan = Vision.scanHard(bmp, topCut, exclude)
         val me = Vision.player(bmp.width, bmp.height)
         val dist = { p: Vision.Pt -> hypot(p.x - me.x, p.y - me.y) }
@@ -401,8 +416,75 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             tapTarget(tg, bmp)
             return
         }
+        // 畫面上沒有怪：用小地圖找方向
+        val dir = hardDir
+        if (dir != null && hardSwipes < 3) {
+            hardSwipes++
+            val cx = w / 2; val cy = h / 2; val d = h * 0.28f
+            act.status("困難模式：往小地圖上怪的方向找（$hardSwipes/3）")
+            // 手指往反方向拖，畫面才會往怪的方向移
+            act.swipe(cx, cy, cx - dir.x * d, cy - dir.y * d, 500)
+            act.humanDelay()
+            return
+        }
+        hardDir = null
+        if (hardMapReads < 3) {
+            if (counter != null) { readMinimap(bmp, counter, big = false); return }
+            if (!hardMapOpened) {
+                hardMapOpened = true
+                hardEnlarged = false
+                // 左上角的定位圖示，和任務欄同一高度
+                val y = quest?.box?.exactCenterY() ?: (w * 0.173f)
+                act.status("困難模式：打開小地圖找怪")
+                act.tap(w * 0.074f, y, precise = true)
+                act.humanDelay()
+                return
+            }
+        }
         if (!prefs.patrol) return act.status("困難模式：找不到怪（巡弋已關閉）")
         patrol(w, h)
+    }
+
+    /**
+     * 讀小地圖：隊伍在小地圖正中央，找 Boss（帶骷髏的三角）或最近的怪（粉紅小三角），記下方向。
+     * 小地圖上沒有就按放大鏡看更大範圍；放大後還是沒有就關掉改用探路。
+     */
+    private suspend fun readMinimap(bmp: Bitmap, counter: TextLine, big: Boolean) {
+        val w = bmp.width.toFloat()
+        val box = Vision.minimapRect(w, counter.box)
+        val marks = Vision.minimapMarks(bmp, box)
+        val c = Vision.Pt(box.centerX(), box.centerY())
+        val t = marks.boss ?: marks.monsters.minByOrNull { hypot(it.x - c.x, it.y - c.y) }
+        if (t == null && !big && !hardEnlarged) {
+            hardEnlarged = true
+            act.status("困難模式：小地圖上沒有怪 → 放大地圖")
+            act.tap(box.left + box.width() * 0.1f, box.top + box.width() * 0.09f, precise = true)
+            act.humanDelay()
+            return
+        }
+        hardMapReads++
+        if (t != null) {
+            val dx = t.x - c.x; val dy = t.y - c.y
+            val len = hypot(dx, dy).coerceAtLeast(1f)
+            hardDir = Vision.Pt(dx / len, dy / len)
+            hardSwipes = 0
+            val where = when {
+                kotlin.math.abs(dx) > kotlin.math.abs(dy) * 2 -> if (dx > 0) "右" else "左"
+                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 2 -> if (dy > 0) "下" else "上"
+                else -> (if (dy > 0) "下" else "上") + (if (dx > 0) "右" else "左")
+            }
+            act.status("困難模式：${if (marks.boss != null) "Boss" else "怪"}在$where 方")
+        } else {
+            act.status("困難模式：地圖上找不到怪")
+            if (big) hardMapReads = 3   // 放大也看不到，改用探路
+        }
+        if (big) {
+            // 放大地圖會擋住畫面，讀完就關
+            val x = Vision.minimapClosePoint(bmp, counter.box)
+            if (x != null) act.tap(x.x, x.y, precise = true) else act.back()
+            hardMapOpened = false
+            act.humanDelay()
+        }
     }
 
     /** 困難模式本章完成：點右下角區域編號打開章節清單。 */
@@ -513,6 +595,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     }
 
     private suspend fun tapTarget(p: Vision.Pt, bmp: Bitmap) {
+        resetHardSearch()
         lastTarget = p
         prevMapFrame = bmp
         patrolStep = 0
@@ -550,7 +633,16 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         act.humanDelay()
     }
 
+    private fun resetHardSearch() {
+        hardDir = null
+        hardSwipes = 0
+        hardMapOpened = false
+        hardEnlarged = false
+        hardMapReads = 0
+    }
+
     private fun resetMapState() {
+        resetHardSearch()
         lastTarget = null
         sameTargetCount = 0
         patrolStep = 0
