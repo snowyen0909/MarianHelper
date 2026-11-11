@@ -734,12 +734,18 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             shop != null -> shop.box.exactCenterX() - f.w * 0.06f to shop.box.exactCenterY() - f.w * 0.1f
             else -> return Result.Fail("找不到付費商店")
         }
-        val s = tapUntil(px, py, waitMs = 20_000) { it.find("付費商店", "付费商店", yMax = 0.08f) != null }
-            ?: return Result.Fail("付費商店沒有打開")
-        val label = s.find("付費商店", "付费商店", yMax = 0.08f)!!
-        // 分頁列沒有文字：「普通禮包」是第 3 個，在「付費商店」標籤下方約 34% 螢幕寬
+        // 有限時的彈出式禮包時，商店會直接開在「彈出式禮包」分頁，標題不是「付費商店」
+        val popupKeys = arrayOf("彈出式禮包", "弹出式礼包", "彈出式礼包")
+        val s = tapUntil(px, py, waitMs = 20_000) {
+            it.find("付費商店", "付费商店", yMax = 0.08f) != null || it.find(*popupKeys, yMax = 0.12f) != null
+        } ?: return Result.Fail("付費商店沒有打開")
+        val shopLabel = s.find("付費商店", "付费商店", yMax = 0.08f)
+        val popupLabel = s.find(*popupKeys, yMax = 0.12f)
+        // 分頁列沒有文字：「普通禮包」是第 3 個。
+        // 一般在「付費商店」標籤下方約 34% 螢幕寬；彈出式禮包分頁的標題比較低，分頁列在它下方約 22% 螢幕寬
         val isGift = { fr: Frame -> fr.find("普通禮包", "普通礼包", yMax = 0.3f) != null }
-        val tabY = label.box.exactCenterY() + s.w * 0.335f
+        val tabY = if (shopLabel != null) shopLabel.box.exactCenterY() + s.w * 0.335f
+        else popupLabel!!.box.exactCenterY() + s.w * 0.221f
         var g: Frame? = if (isGift(s)) s else null
         if (g == null) {
             // 先試圖片比對找到的禮物分頁，再從左到右逐一試
