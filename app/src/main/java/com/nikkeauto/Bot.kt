@@ -47,6 +47,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var lastCounter: android.graphics.Rect? = null
     private var prevMapFrame: Bitmap? = null
 
+    // ---- 踩機關 ----
+    /** 連續點同一個機關的次數；踩不亮就暫時不管它。 */
+    private var plateTaps = 0
+    private var plateSkip = 0
+
     // ---- 困難模式 ----
     /** 最近一次地圖畫面是不是困難模式。 */
     private var hardMode = false
@@ -295,6 +300,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
         val topCut = quest?.let { it.box.bottom + it.box.height() * 0.8f } ?: (h * 0.13f)
         val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box, h) })
+        if (stepPlate(bmp, topCut, exclude)) return
         val scan = Vision.scanMap(bmp, topCut, exclude)
         val me = Vision.player(bmp.width, bmp.height)
 
@@ -369,6 +375,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             readBigMap(bmp, counter)
             return
         }
+        if (stepPlate(bmp, topCut, exclude)) return
         val scan = Vision.scanHard(bmp, topCut, exclude)
         val me = Vision.player(bmp.width, bmp.height)
         val dist = { p: Vision.Pt -> hypot(p.x - me.x, p.y - me.y) }
@@ -478,6 +485,30 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         if (x != null) act.tap(x.x, x.y, precise = true) else act.back()
         hardMapOpened = false
         act.humanDelay()
+    }
+
+    /**
+     * 踩機關：畫面上有還沒踩的圓形機關（灰色圓盤、中間八角形）就先走過去踩。
+     * 踩過的會發白光，比對不到樣本，自然就跳過。
+     * 連點 4 次還是沒亮（可能走不過去），接下來 40 步先不管它。
+     */
+    private suspend fun stepPlate(bmp: Bitmap, topCut: Float, exclude: List<android.graphics.RectF>): Boolean {
+        if (!prefs.stepPlates) return false
+        if (plateSkip > 0) { plateSkip--; return false }
+        val p = Vision.findPlate(bmp, topCut, exclude)
+        if (p == null) { plateTaps = 0; return false }
+        plateTaps++
+        if (plateTaps > 4) {
+            plateTaps = 0
+            plateSkip = 40
+            act.status("機關踩不到 → 先略過")
+            return false
+        }
+        act.status("發現機關 → 先踩（$plateTaps）")
+        lastTarget = null
+        act.tap(p.x, p.y)
+        act.humanDelay()
+        return true
     }
 
     /** 困難模式本章完成：點右下角區域編號打開章節清單。 */

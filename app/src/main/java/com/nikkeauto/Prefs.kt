@@ -29,6 +29,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_ONLY_MAIN, true)
         set(v) = sp.edit().putBoolean(K_ONLY_MAIN, v).apply()
 
+    /** 跑圖時先踩附近還沒踩的機關。 */
+    var stepPlates: Boolean
+        get() = sp.getBoolean(K_STEP_PLATES, true)
+        set(v) = sp.edit().putBoolean(K_STEP_PLATES, v).apply()
+
     /** 困難模式打完 Boss 自動切到下一章。 */
     var hardNextChapter: Boolean
         get() = sp.getBoolean(K_HARD_NEXT, true)
@@ -163,6 +168,7 @@ class Prefs(context: Context) {
         private const val K_PATROL = "patrol"
         private const val K_ONLY_MAIN = "only_main"
         private const val K_HARD_NEXT = "hard_next_chapter"
+        private const val K_STEP_PLATES = "step_plates"
         private const val K_DMIN = "delay_min"
         private const val K_DAILY_ORDER = "daily_order"
         private const val K_DONE_DAY = "daily_done_day"

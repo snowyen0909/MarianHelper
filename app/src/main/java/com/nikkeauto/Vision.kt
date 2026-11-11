@@ -232,6 +232,36 @@ object Vision {
         return MiniMarks(tri.filter { it !== boss }.map { Pt(it.cx, it.cy) }, boss?.let { Pt(it.cx, it.cy) })
     }
 
+    /**
+     * 找還沒踩的機關（圓形踏板）。樣本：plate_a、plate_b（暗色地圖）、plate_c（雪地）。
+     * 分數 0.68 以上才算；中心太亮（發光＝已踩過）不算。
+     */
+    fun findPlate(bmp: Bitmap, topCut: Float, exclude: List<android.graphics.RectF>): Pt? {
+        val h = bmp.height.toFloat()
+        val land = bmp.width > bmp.height
+        val y0 = (topCut / h).coerceIn(0f, 0.5f)
+        val scales = if (land) floatArrayOf(0.55f, 0.7f, 0.85f, 1f) else floatArrayOf(0.75f, 0.9f, 1.05f, 1.2f)
+        var best: Templates.Match? = null
+        for (name in listOf("plate_a", "plate_b", "plate_c")) {
+            val m = Templates.find(bmp, name, 0f, y0, 1f, 0.89f, scales) ?: continue
+            if (m.score < 0.68f) continue
+            if (exclude.any { it.contains(m.x, m.y) } || hudRect?.contains(m.x, m.y) == true) continue
+            if (best == null || m.score > best.score) best = m
+        }
+        val b = best ?: return null
+        // 中心發白光＝已經踩過
+        val hsv = FloatArray(3)
+        var bright = 0; var n = 0
+        for (y in (b.y - 4).toInt()..(b.y + 4).toInt()) for (x in (b.x - 4).toInt()..(b.x + 4).toInt()) {
+            if (x !in 0 until bmp.width || y !in 0 until bmp.height) continue
+            android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
+            n++
+            if (hsv[2] > 0.85f && hsv[1] < 0.15f) bright++
+        }
+        if (n > 0 && bright * 2 > n) return null
+        return Pt(b.x, b.y)
+    }
+
     /** 右下角區域編號上方的紅色「HARD」標籤。 */
     fun hardLabel(bmp: Bitmap): Boolean {
         val w = bmp.width; val h = bmp.height
