@@ -1,6 +1,7 @@
 package com.nikkeauto
 
 import android.graphics.Bitmap
+import kotlinx.coroutines.delay
 import kotlin.math.hypot
 
 /** 機器人對外需要的動作，由 AutoService 實作。座標都是 720 寬的縮小畫面座標。 */
@@ -54,12 +55,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var lastArea: Int? = null
     private var chapterOpenTries = 0
     private var chapterListLooks = 0
-    /** 從小地圖讀到的怪的方向（單位向量），往這個方向移動畫面找怪。 */
-    private var hardDir: Vision.Pt? = null
-    private var hardSwipes = 0
-    /** 這一輪已經打開過小地圖／放大過。 */
+    /** 在放大地圖上設了路標，接下來幾步等隊伍走過去。 */
+    private var hardWalk = 0
+    /** 已經點過定位圖示、等地圖打開。 */
     private var hardMapOpened = false
-    private var hardEnlarged = false
+    /** 設路標的次數（之間沒有打到怪），太多次就改用探路。 */
     private var hardMapReads = 0
 
     suspend fun step(bmp: Bitmap, lines: List<TextLine>) {
@@ -366,7 +366,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box) })
         // 放大的地圖開著：讀完方向就關掉
         if (counter != null && counter.box.exactCenterX() > w * 0.6f) {
-            readMinimap(bmp, counter, big = true)
+            readBigMap(bmp, counter)
             return
         }
         val scan = Vision.scanHard(bmp, topCut, exclude)
@@ -416,75 +416,67 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             tapTarget(tg, bmp)
             return
         }
-        // 畫面上沒有怪：用小地圖找方向
-        val dir = hardDir
-        if (dir != null && hardSwipes < 3) {
-            hardSwipes++
-            val cx = w / 2; val cy = h / 2; val d = h * 0.28f
-            act.status("困難模式：往小地圖上怪的方向找（$hardSwipes/3）")
-            // 手指往反方向拖，畫面才會往怪的方向移
-            act.swipe(cx, cy, cx - dir.x * d, cy - dir.y * d, 500)
-            act.humanDelay()
+        // 畫面上沒有怪：打開地圖，在放大的地圖上點怪的位置設路標，隊伍會自己走過去
+        if (hardWalk > 0) {
+            hardWalk--
+            act.status("困難模式：隊伍走向地圖上的目標…")
+            delay(1200)
             return
         }
-        hardDir = null
-        if (hardMapReads < 3) {
-            if (counter != null) { readMinimap(bmp, counter, big = false); return }
+        if (hardMapReads < 5) {
+            if (counter != null) {
+                // 小地圖開著 → 按放大鏡
+                val box = Vision.minimapRect(w, counter.box)
+                act.status("困難模式：放大地圖找怪")
+                act.tap(box.left + box.width() * 0.1f, box.top + box.width() * 0.09f, precise = true)
+                act.humanDelay()
+                return
+            }
             if (!hardMapOpened) {
                 hardMapOpened = true
-                hardEnlarged = false
                 // 左上角的定位圖示，和任務欄同一高度
                 val y = quest?.box?.exactCenterY() ?: (w * 0.173f)
-                act.status("困難模式：打開小地圖找怪")
+                act.status("困難模式：打開地圖找怪")
                 act.tap(w * 0.074f, y, precise = true)
                 act.humanDelay()
                 return
             }
+            hardMapOpened = false   // 沒打開，下一輪再點一次
         }
         if (!prefs.patrol) return act.status("困難模式：找不到怪（巡弋已關閉）")
         patrol(w, h)
     }
 
     /**
-     * 讀小地圖：隊伍在小地圖正中央，找 Boss（帶骷髏的三角）或最近的怪（粉紅小三角），記下方向。
-     * 小地圖上沒有就按放大鏡看更大範圍；放大後還是沒有就關掉改用探路。
+     * 讀放大的地圖：剛放大時隊伍在地圖正中央。
+     * 有 Boss（帶骷髏的三角）就點 Boss，沒有就點離隊伍最近的怪（粉紅小三角），
+     * 點下去會出現藍色路標，關掉地圖後隊伍會自動走過去。
      */
-    private suspend fun readMinimap(bmp: Bitmap, counter: TextLine, big: Boolean) {
+    private suspend fun readBigMap(bmp: Bitmap, counter: TextLine) {
         val w = bmp.width.toFloat()
         val box = Vision.minimapRect(w, counter.box)
         val marks = Vision.minimapMarks(bmp, box)
         val c = Vision.Pt(box.centerX(), box.centerY())
         val t = marks.boss ?: marks.monsters.minByOrNull { hypot(it.x - c.x, it.y - c.y) }
-        if (t == null && !big && !hardEnlarged) {
-            hardEnlarged = true
-            act.status("困難模式：小地圖上沒有怪 → 放大地圖")
-            act.tap(box.left + box.width() * 0.1f, box.top + box.width() * 0.09f, precise = true)
-            act.humanDelay()
-            return
-        }
         hardMapReads++
         if (t != null) {
-            val dx = t.x - c.x; val dy = t.y - c.y
+            // 往隊伍方向內縮一點，點在三角旁邊的路面上
+            val dx = c.x - t.x; val dy = c.y - t.y
             val len = hypot(dx, dy).coerceAtLeast(1f)
-            hardDir = Vision.Pt(dx / len, dy / len)
-            hardSwipes = 0
-            val where = when {
-                kotlin.math.abs(dx) > kotlin.math.abs(dy) * 2 -> if (dx > 0) "右" else "左"
-                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 2 -> if (dy > 0) "下" else "上"
-                else -> (if (dy > 0) "下" else "上") + (if (dx > 0) "右" else "左")
-            }
-            act.status("困難模式：${if (marks.boss != null) "Boss" else "怪"}在$where 方")
+            val k = minOf(10f, len) / len
+            act.status("困難模式：在地圖上點${if (marks.boss != null) " Boss" else "最近的怪"}設路標")
+            act.tap(t.x + dx * k, t.y + dy * k, precise = true)
+            delay(900)
+            hardWalk = 6
         } else {
-            act.status("困難模式：地圖上找不到怪")
-            if (big) hardMapReads = 3   // 放大也看不到，改用探路
+            act.status("困難模式：地圖上找不到怪 → 改用探路")
+            hardMapReads = 5
         }
-        if (big) {
-            // 放大地圖會擋住畫面，讀完就關
-            val x = Vision.minimapClosePoint(bmp, counter.box)
-            if (x != null) act.tap(x.x, x.y, precise = true) else act.back()
-            hardMapOpened = false
-            act.humanDelay()
-        }
+        // 關掉放大地圖
+        val x = Vision.minimapClosePoint(bmp, counter.box)
+        if (x != null) act.tap(x.x, x.y, precise = true) else act.back()
+        hardMapOpened = false
+        act.humanDelay()
     }
 
     /** 困難模式本章完成：點右下角區域編號打開章節清單。 */
@@ -634,10 +626,8 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     }
 
     private fun resetHardSearch() {
-        hardDir = null
-        hardSwipes = 0
+        hardWalk = 0
         hardMapOpened = false
-        hardEnlarged = false
         hardMapReads = 0
     }
 

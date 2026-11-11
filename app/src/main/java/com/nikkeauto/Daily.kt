@@ -214,11 +214,11 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         val r = rewardTitle(f)
         val hint = f.find(*CONTINUE)
         val ry = r?.box?.exactCenterY() ?: (f.h * 0.35f)
+        // 不點標題正下方：那裡是獎勵物品，點到會打開物品說明
         val spots = listOf(
-            ry,
-            hint?.box?.exactCenterY() ?: (ry + f.h * 0.2f),
-            ry + f.h * 0.1f,
+            hint?.box?.exactCenterY() ?: (ry + f.h * 0.22f),
             f.h * 0.88f,
+            ry,
             f.h * 0.12f,
         )
         val i = rewardTries % (spots.size + 1)
@@ -783,7 +783,8 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
             if (buy != null && isFree) tap(buy)
             else if (buy != null) { r.exact("取消").firstOrNull()?.let { tap(it) }; return Result.Skip("不是免費的，已取消") }
         }
-        waitFor(8_000) { it.find(*CONTINUE) == null && !it.has("感覺怎麼樣", "感觉怎么样") }
+        // 「點擊領取獎勵」字很淡常讀不到，所以也要等 REWARD 標題消失
+        waitFor(10_000) { it.find(*CONTINUE) == null && rewardTitle(it) == null && !it.has("感覺怎麼樣", "感觉怎么样") }
         return Result.Done
     }
 
@@ -824,7 +825,7 @@ class DailyRunner(private val prefs: Prefs, private val act: Actions) {
         }
         val buy = button(d, "購買", "购买") ?: rightOfCancel(d) ?: return Result.Fail("找不到購買按鈕")
         tap(buy)
-        waitFor(8_000) { it.find(*CONTINUE) == null && isShop(it) }
+        waitFor(8_000) { it.find(*CONTINUE) == null && rewardTitle(it) == null && isShop(it) }
         return Result.Done
     }
 
