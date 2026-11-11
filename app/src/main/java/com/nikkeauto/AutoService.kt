@@ -149,8 +149,8 @@ class AutoService : AccessibilityService(), Actions, HudCallbacks {
     /** 截圖並辨識文字；畫面縮成寬 720，左上角另外用原解析度讀小字。 */
     private suspend fun snapshot(): Frame? {
         val shot = capture() ?: return null
-        scale = shot.width / Vision.WIDTH.toFloat()
         val small = Vision.normalize(shot)
+        scale = shot.width / small.width.toFloat()
         val crop = Bitmap.createBitmap(shot, 0, 0, shot.width / 2, (shot.height * 0.4f).toInt())
         val extra = reader.read(crop).map { l ->
             val b = l.box

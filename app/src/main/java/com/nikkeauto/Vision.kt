@@ -41,12 +41,15 @@ object Vision {
     private const val M_RED: Byte = 3
     private const val M_WHITE: Byte = 4
 
-    /** 把截圖縮成寬 720 的軟體 Bitmap。 */
+    /**
+     * 把截圖縮成短邊 720 的軟體 Bitmap。
+     * 直屏就是寬 720；橫屏（困難模式推圖）是高 720，寬依比例，像素密度和直屏一樣。
+     */
     fun normalize(src: Bitmap): Bitmap {
-        val h = (src.height * WIDTH.toFloat() / src.width).toInt()
+        val k = WIDTH.toFloat() / min(src.width, src.height)
         val soft = if (src.config == Bitmap.Config.HARDWARE)
             src.copy(Bitmap.Config.ARGB_8888, false) else src
-        return Bitmap.createScaledBitmap(soft, WIDTH, h, true)
+        return Bitmap.createScaledBitmap(soft, (src.width * k).toInt(), (src.height * k).toInt(), true)
     }
 
     /**
@@ -230,13 +233,17 @@ object Vision {
     /** 右下角區域編號上方的紅色「HARD」標籤。 */
     fun hardLabel(bmp: Bitmap): Boolean {
         val w = bmp.width; val h = bmp.height
+        val land = w > h
+        // 橫屏的標籤比較小，而且貼在右下角
+        val (x0, x1) = if (land) 0.9f to 0.99f else 0.6f to 0.92f
+        val (y0, y1) = if (land) 0.86f to 0.95f else 0.86f to 0.97f
         val hsv = FloatArray(3)
         var n = 0
-        for (y in (h * 0.86f).toInt() until (h * 0.97f).toInt()) for (x in (w * 0.6f).toInt() until (w * 0.92f).toInt()) {
+        for (y in (h * y0).toInt() until (h * y1).toInt()) for (x in (w * x0).toInt() until (w * x1).toInt()) {
             android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
             if ((hsv[0] <= 12f || hsv[0] >= 345f) && hsv[1] >= 0.6f && hsv[2] >= 0.55f) n++
         }
-        return n >= 1500
+        return n >= (if (land) 400 else 1500)
     }
 
     /** 我方隊伍位置：鏡頭跟隨隊伍，約在畫面正中央。 */
@@ -404,13 +411,17 @@ object Vision {
     }
 
     /** 由「0/14」計數推算小地圖的範圍（正方形）。 */
-    fun minimapRect(w: Float, counter: android.graphics.Rect): android.graphics.RectF {
+    fun minimapRect(w: Float, counter: android.graphics.Rect, h: Float = 0f): android.graphics.RectF {
         val cr = counter.right.toFloat()
         val right: Float
         val size: Float
         if (counter.exactCenterX() > w * 0.6f) {          // 放大的置中地圖
             right = (cr - 0.055f * w) / 0.89f
             size = 2 * right - w
+        } else if (h > 0f && w > h) {                     // 橫屏左上角小地圖（比較小）
+            val left = 0.021f * h
+            size = (cr - left) / 0.94f
+            right = left + size
         } else {                                          // 左上角小地圖
             val left = 0.035f * w
             right = (cr - 0.055f * left) / 0.945f
@@ -426,7 +437,7 @@ object Vision {
      * 推算後再在附近找白色叉叉的像素，取中心點微調。
      */
     fun minimapClosePoint(bmp: Bitmap, counter: android.graphics.Rect): Pt? {
-        val box = minimapRect(bmp.width.toFloat(), counter)
+        val box = minimapRect(bmp.width.toFloat(), counter, bmp.height.toFloat())
         val size = box.width()
         val px = box.right - 0.11f * size
         val py = box.top + 0.09f * size

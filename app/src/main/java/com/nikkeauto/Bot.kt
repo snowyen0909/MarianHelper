@@ -294,7 +294,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         // 任務欄（含左邊藍色圓形 !）以上全部當 UI；讀不到任務欄時用 13%
         val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
         val topCut = quest?.let { it.box.bottom + it.box.height() * 0.8f } ?: (h * 0.13f)
-        val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box) })
+        val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box, h) })
         val scan = Vision.scanMap(bmp, topCut, exclude)
         val me = Vision.player(bmp.width, bmp.height)
 
@@ -363,7 +363,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         val h = bmp.height.toFloat()
         val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
         val topCut = quest?.let { it.box.bottom + it.box.height() * 0.8f } ?: (h * 0.13f)
-        val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box) })
+        val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box, h) })
         // 放大的地圖開著：讀完方向就關掉
         if (counter != null && counter.box.exactCenterX() > w * 0.6f) {
             readBigMap(bmp, counter)
@@ -426,7 +426,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         if (hardMapReads < 5) {
             if (counter != null) {
                 // 小地圖開著 → 按放大鏡
-                val box = Vision.minimapRect(w, counter.box)
+                val box = Vision.minimapRect(w, counter.box, bmp.height.toFloat())
                 act.status("困難模式：放大地圖找怪")
                 act.tap(box.left + box.width() * 0.1f, box.top + box.width() * 0.09f, precise = true)
                 act.humanDelay()
@@ -434,10 +434,11 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             }
             if (!hardMapOpened) {
                 hardMapOpened = true
-                // 左上角的定位圖示，和任務欄同一高度
-                val y = quest?.box?.exactCenterY() ?: (w * 0.173f)
+                // 左上角的定位圖示，和任務欄同一高度（橫屏時圖示比較小、比較靠左）
+                val land = w > h
+                val y = quest?.box?.exactCenterY() ?: (if (land) h * 0.1f else w * 0.173f)
                 act.status("困難模式：打開地圖找怪")
-                act.tap(w * 0.074f, y, precise = true)
+                act.tap(if (land) h * 0.04f else w * 0.074f, y, precise = true)
                 act.humanDelay()
                 return
             }
@@ -454,7 +455,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
      */
     private suspend fun readBigMap(bmp: Bitmap, counter: TextLine) {
         val w = bmp.width.toFloat()
-        val box = Vision.minimapRect(w, counter.box)
+        val box = Vision.minimapRect(w, counter.box, bmp.height.toFloat())
         val marks = Vision.minimapMarks(bmp, box)
         val c = Vision.Pt(box.centerX(), box.centerY())
         val t = marks.boss ?: marks.monsters.minByOrNull { hypot(it.x - c.x, it.y - c.y) }
@@ -490,7 +491,7 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         }
         if (chapterOpenTries % 2 == 0) return act.status("困難模式：等待章節清單…")
         val ca = ScreenReader.find(lines, "CURRENTAREA")
-        val x = ca?.box?.exactCenterX() ?: (w * 0.75f)
+        val x = ca?.box?.exactCenterX() ?: (if (w > h) w * 0.937f else w * 0.75f)
         val y = ca?.let { it.box.top - it.box.height() * 1.5f } ?: (h * 0.935f)
         chapterListLooks = 0
         act.status("困難模式：打開章節清單切下一章")
