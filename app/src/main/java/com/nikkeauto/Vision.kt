@@ -81,6 +81,125 @@ object Vision {
         return MapScan(mains, rings.filter { it !in used }, sideDiamonds)
     }
 
+    /** 困難模式的地圖目標：一般怪與 Boss（點擊位置）。 */
+    data class HardScan(val monsters: List<Pt>, val boss: Pt?)
+
+    /**
+     * 困難模式沒有驚嘆號指引，而且畫面較暗、怪物腳下的紅圈常被身體擋成好幾段，
+     * 所以不找完整橢圓：把紅色像素切成 6×6 的格子，相鄰（隔一格內）的紅格子併成一群，
+     * 每一群就是一隻怪。紅色量特別大的是 Boss（紅色三角骷髏＋光柱）。
+     * 排除：中間是白色的 EX 方向指示、上方有淡橘色 EX 三角的 EX 關卡。
+     */
+    fun scanHard(bmp: Bitmap, topCut: Float, exclude: List<android.graphics.RectF> = emptyList()): HardScan {
+        uiTop = topCut
+        uiExclude = exclude
+        val w = bmp.width
+        val h = bmp.height
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        val cls = classify(px)
+        val c = 6
+        val gw = w / c
+        val gh = h / c
+        val cnt = IntArray(gw * gh)
+        for (gy in 0 until gh) for (gx in 0 until gw) {
+            var n = 0
+            for (y in gy * c until gy * c + c) for (x in gx * c until gx * c + c) if (cls[y * w + x] == M_RED) n++
+            cnt[gy * gw + gx] = n
+        }
+        val on = BooleanArray(cnt.size) { cnt[it] >= 3 }
+        // 膨脹一格，讓斷開的光圈碎片連在一起
+        val dil = BooleanArray(cnt.size)
+        for (gy in 0 until gh) for (gx in 0 until gw) {
+            if (!on[gy * gw + gx]) continue
+            for (oy in -1..1) for (ox in -1..1) {
+                val nx = gx + ox; val ny = gy + oy
+                if (nx in 0 until gw && ny in 0 until gh) dil[ny * gw + nx] = true
+            }
+        }
+        val seen = BooleanArray(cnt.size)
+        val stack = IntArray(cnt.size)
+        val mons = ArrayList<Pt>()
+        var boss: Pt? = null
+        var bossN = 0
+        for (start in cnt.indices) {
+            if (seen[start] || !dil[start]) continue
+            var sp = 0
+            stack[sp++] = start; seen[start] = true
+            var l = gw; var t = gh; var r = 0; var b = 0
+            var n = 0; var sx = 0f; var sy = 0f
+            val cells = ArrayList<Int>()
+            while (sp > 0) {
+                val p = stack[--sp]
+                val x = p % gw; val y = p / gw
+                if (on[p]) {
+                    cells += p
+                    n += cnt[p]; sx += (x * c + c / 2f) * cnt[p]; sy += (y * c + c / 2f) * cnt[p]
+                    if (x < l) l = x; if (x > r) r = x
+                    if (y < t) t = y; if (y > b) b = y
+                }
+                for (oy in -1..1) for (ox in -1..1) {
+                    val nx = x + ox; val ny = y + oy
+                    if (nx !in 0 until gw || ny !in 0 until gh) continue
+                    val q = ny * gw + nx
+                    if (!seen[q] && dil[q]) { seen[q] = true; stack[sp++] = q }
+                }
+            }
+            if (n < 120 || cells.isEmpty()) continue
+            val bl = Blob(l * c, t * c, r * c + c - 1, b * c + c - 1, n)
+            if (bl.w < 24 || inUi(bl, w, h)) continue
+            if (whiteRatio(cls, w, bl) >= 0.15f) continue          // EX 方向指示（菱形中間白底）
+            if (exAbove(px, w, h, bl) >= 1200) continue            // EX 關卡
+            if (n >= 4000) {
+                // Boss：點下半部的光圈，不點上面的三角光柱
+                val cut = bl.t + bl.h * 0.6f
+                var bx = 0f; var by = 0f; var bn = 0
+                for (p in cells) {
+                    val cy = (p / gw) * c + c / 2f
+                    if (cy < cut) continue
+                    bx += ((p % gw) * c + c / 2f) * cnt[p]; by += cy * cnt[p]; bn += cnt[p]
+                }
+                if (n > bossN) { bossN = n; boss = if (bn > 0) Pt(bx / bn, by / bn) else Pt(sx / n, sy / n) }
+            } else {
+                mons += Pt(sx / n, sy / n)
+            }
+        }
+        return HardScan(mons, boss)
+    }
+
+    private fun whiteRatio(cls: ByteArray, w: Int, bl: Blob): Float {
+        var white = 0; var total = 0
+        for (y in bl.t + bl.h / 4..bl.b - bl.h / 4) for (x in bl.l + bl.w / 4..bl.r - bl.w / 4) {
+            total++
+            if (cls[y * w + x] == M_WHITE) white++
+        }
+        return if (total == 0) 0f else white.toFloat() / total
+    }
+
+    /** 光圈上方淡橘色（EX 三角與光柱）的像素數。 */
+    private fun exAbove(px: IntArray, w: Int, h: Int, bl: Blob): Int {
+        val hsv = FloatArray(3)
+        var n = 0
+        val cx = bl.cx.toInt()
+        for (y in max(0, bl.t - 140)..min(h - 1, bl.t + 10)) for (x in max(0, cx - 50)..min(w - 1, cx + 50)) {
+            android.graphics.Color.colorToHSV(px[y * w + x], hsv)
+            if (hsv[0] in 20f..45f && hsv[1] >= 0.22f && hsv[2] * 255f >= 90f) n++
+        }
+        return n
+    }
+
+    /** 右下角區域編號上方的紅色「HARD」標籤。 */
+    fun hardLabel(bmp: Bitmap): Boolean {
+        val w = bmp.width; val h = bmp.height
+        val hsv = FloatArray(3)
+        var n = 0
+        for (y in (h * 0.86f).toInt() until (h * 0.97f).toInt()) for (x in (w * 0.6f).toInt() until (w * 0.92f).toInt()) {
+            android.graphics.Color.colorToHSV(bmp.getPixel(x, y), hsv)
+            if ((hsv[0] <= 12f || hsv[0] >= 345f) && hsv[1] >= 0.6f && hsv[2] >= 0.55f) n++
+        }
+        return n >= 1500
+    }
+
     /** 我方隊伍位置：鏡頭跟隨隊伍，約在畫面正中央。 */
     fun player(w: Int, h: Int) = Pt(w / 2f, h * 0.49f)
 

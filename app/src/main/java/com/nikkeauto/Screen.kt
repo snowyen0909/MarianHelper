@@ -137,7 +137,7 @@ class ScreenReader {
             val skip = findWord(lines, "SKIP")
             if (skip != null && skip.box.centerY() < height * 0.12f) return ScreenType.STORY
             if (find(lines, "CHAPTERLIST") != null) return ScreenType.CHAPTER_LIST
-            val mission = find(lines, "MISSION")
+            val mission = lines.firstOrNull { !it.isWord && it.norm.contains("MISSION") && !it.norm.contains("MISSIONCLEAR") }
             if (mission != null && mission.box.centerY() < height * 0.35f) return ScreenType.MISSION
             if (find(lines, "點擊任意", "点击任意", "點擊繼續", "点击继续", "點擊將開啟", "点击将开启",
                     "下一章節", "下一章节", "MISSIONCLEAR") != null

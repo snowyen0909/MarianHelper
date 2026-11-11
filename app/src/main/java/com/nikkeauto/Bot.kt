@@ -46,6 +46,15 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
     private var lastCounter: android.graphics.Rect? = null
     private var prevMapFrame: Bitmap? = null
 
+    // ---- 困難模式 ----
+    /** 最近一次地圖畫面是不是困難模式。 */
+    private var hardMode = false
+    /** 打完 Boss、本章完成，要切到下一章。值是完成那一章的區域編號（讀不到為 0）。 */
+    private var hardNext: Int? = null
+    private var lastArea: Int? = null
+    private var chapterOpenTries = 0
+    private var chapterListLooks = 0
+
     suspend fun step(bmp: Bitmap, lines: List<TextLine>) {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
@@ -96,6 +105,20 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             }
 
             ScreenType.TAP_ANY -> {
+                // 困難模式：「CHAPTER 03 … MISSION CLEAR」→「點擊開啟下一章節」代表這章打完了
+                if (hardMode && hardNext == null &&
+                    (ScreenReader.find(lines, "下一章節", "下一章节") != null ||
+                        (ScreenReader.find(lines, "CHAPTER") != null && ScreenReader.find(lines, "MISSIONCLEAR") != null))
+                ) {
+                    if (!prefs.hardNextChapter) {
+                        act.stopWithAlert("困難模式本章完成", "第 ${lastArea ?: "?"} 章困難模式已完成，已停止（自動切章已關閉）。")
+                        return
+                    }
+                    hardNext = lastArea ?: 0
+                    chapterOpenTries = 0
+                    chapterListLooks = 0
+                    act.status("困難模式：第 ${lastArea ?: "?"} 章完成，準備切下一章")
+                }
                 if (!prefs.skipStory) return act.status("結算（跳過已關閉）")
                 act.status("結算 → 點擊繼續")
                 act.tap(w * 0.5f, h * 0.72f)
@@ -112,6 +135,21 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
             }
 
             ScreenType.CHAPTER_LIST -> {
+                // 困難模式切章：點「NEW CHAPTER」下面的章節
+                if (hardNext != null) {
+                    val nc = lines.firstOrNull { !it.isWord && it.norm.contains("NEWCHAPTER") }
+                    if (nc != null) {
+                        act.status("困難模式 → 進入下一章")
+                        act.tap(nc.box.exactCenterX(), nc.box.exactCenterY() + nc.box.height() * 1.5f)
+                        act.humanDelay()
+                        return
+                    }
+                    chapterListLooks++
+                    if (chapterListLooks < 3) return act.status("章節清單：找下一章…")
+                    hardNext = null
+                    act.stopWithAlert("困難模式已推到最新", "章節清單裡沒有新的困難章節，可能要先推進普通模式，已停止。")
+                    return
+                }
                 // 打完 Boss 會跳出章節清單，點右上角 X 關掉
                 val title = ScreenReader.find(lines, "CHAPTERLIST")!!
                 val guess = Vision.Pt(w * 0.9f, title.box.exactCenterY())
@@ -201,6 +239,27 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                     act.status("找不到小地圖的 X，先略過")
                 }
 
+                val area = ScreenReader.currentArea(lines, bmp.width, bmp.height)
+                hardMode = Vision.hardLabel(bmp) ||
+                    lines.any { it.norm.contains("HARD") && it.norm.length <= 6 && it.box.exactCenterY() > h * 0.85f && it.box.exactCenterX() > w * 0.55f }
+                if (hardMode) {
+                    // 困難模式沒有指引，任務欄是普通模式的任務，不能點
+                    val done = hardNext
+                    if (done != null) {
+                        if (area != null && done != 0 && area != done) {
+                            hardNext = null
+                            act.status("困難模式：已進入第 $area 章")
+                        } else {
+                            openChapterList(bmp, lines)
+                            return
+                        }
+                    }
+                    if (area != null) lastArea = area
+                    handleHardMap(bmp, lines, counter)
+                    return
+                }
+                if (area != null) lastArea = area
+
                 // 任務要求前往其他場景（方舟、前哨基地）時，點任務欄的藍色箭頭
                 val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
                 if (quest != null && quest.norm.contains("前往") && questTaps < 3) {
@@ -208,7 +267,6 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
                 }
                 // 任務「通關【7-1】」但目前在 06 區 → 點箭頭前往下一區
                 val questCh = quest?.let { ScreenReader.questChapter(it) }
-                val area = ScreenReader.currentArea(lines, bmp.width, bmp.height)
                 if (questCh != null && area != null && questCh != area && questTaps < 3) {
                     act.status("任務在 $questCh 區，目前在 $area 區")
                     if (tapQuestArrow(bmp, quest!!)) return
@@ -284,6 +342,86 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         // 5. 探路
         if (!prefs.patrol) return act.status("找不到目標（巡弋已關閉）")
         patrol(w, h)
+    }
+
+    /**
+     * 困難模式：沒有驚嘆號，自己找怪。
+     * 看得到 Boss 就往 Boss 走（路上有怪先打），看不到就打最近的怪，都沒有就探路。
+     */
+    private suspend fun handleHardMap(bmp: Bitmap, lines: List<TextLine>, counter: TextLine?) {
+        val w = bmp.width.toFloat()
+        val h = bmp.height.toFloat()
+        val quest = ScreenReader.questLine(lines, bmp.width, bmp.height)
+        val topCut = quest?.let { it.box.bottom + it.box.height() * 0.8f } ?: (h * 0.13f)
+        val exclude = listOfNotNull(counter?.let { Vision.minimapRect(w, it.box) })
+        val scan = Vision.scanHard(bmp, topCut, exclude)
+        val me = Vision.player(bmp.width, bmp.height)
+        val dist = { p: Vision.Pt -> hypot(p.x - me.x, p.y - me.y) }
+
+        var target: Vision.Pt? = null
+        var label = ""
+        val boss = scan.boss
+        if (boss != null) {
+            target = boss; label = "Boss"
+            // 路線上的怪先打
+            val dx = boss.x - me.x; val dy = boss.y - me.y
+            val len2 = dx * dx + dy * dy
+            if (len2 > 1f) {
+                scan.monsters.mapNotNull { m ->
+                    val t = ((m.x - me.x) * dx + (m.y - me.y) * dy) / len2
+                    if (t < 0.08f || t > 0.92f) return@mapNotNull null
+                    val d = hypot(m.x - (me.x + t * dx), m.y - (me.y + t * dy))
+                    if (d <= 70f) m to t else null
+                }.minByOrNull { it.second }?.let { target = it.first; label = "擋路的怪" }
+            }
+        } else {
+            scan.monsters.minByOrNull(dist)?.let { target = it; label = "怪" }
+        }
+
+        val tg = target
+        if (tg != null) {
+            if (isStuck(tg)) {
+                // 走不過去：換一隻離這個目標遠一點的怪
+                val other = scan.monsters.filter { hypot(it.x - tg.x, it.y - tg.y) > 60f }.minByOrNull(dist)
+                if (other != null && sameTargetCount < 6) {
+                    act.status("困難模式：走不過去 → 改打別隻")
+                    sameTargetCount = 0
+                    tapTarget(other, bmp)
+                    return
+                }
+                if (sameTargetCount >= 6) {
+                    sameTargetCount = 0
+                    lastTarget = null
+                    act.status("困難模式：一直走不過去 → 探路")
+                    if (prefs.patrol) patrol(w, h)
+                    return
+                }
+            }
+            act.status("困難模式 → 點$label")
+            tapTarget(tg, bmp)
+            return
+        }
+        if (!prefs.patrol) return act.status("困難模式：找不到怪（巡弋已關閉）")
+        patrol(w, h)
+    }
+
+    /** 困難模式本章完成：點右下角區域編號打開章節清單。 */
+    private suspend fun openChapterList(bmp: Bitmap, lines: List<TextLine>) {
+        val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
+        chapterOpenTries++
+        if (chapterOpenTries > 6) {
+            hardNext = null
+            act.stopWithAlert("打不開章節清單", "困難模式本章已完成，但打不開章節清單切到下一章，已停止。")
+            return
+        }
+        if (chapterOpenTries % 2 == 0) return act.status("困難模式：等待章節清單…")
+        val ca = ScreenReader.find(lines, "CURRENTAREA")
+        val x = ca?.box?.exactCenterX() ?: (w * 0.75f)
+        val y = ca?.let { it.box.top - it.box.height() * 1.5f } ?: (h * 0.935f)
+        chapterListLooks = 0
+        act.status("困難模式：打開章節清單切下一章")
+        act.tap(x, y)
+        act.humanDelay()
     }
 
     /** 點任務欄右邊的藍色圓形箭頭。 */
@@ -399,7 +537,9 @@ class Bot(private val prefs: Prefs, private val act: Actions) {
         )
         // 探路兩整輪都沒找到目標，多半是門關著或需要踩踏板
         if (patrolStep >= moves.size * 2) {
-            act.stopWithAlert("找不到目標，已停止", "探路兩輪都沒找到主線目標，可能需要先踩地上的踏板開門，請手動處理後再開始。")
+            act.stopWithAlert("找不到目標，已停止",
+                if (hardMode) "困難模式探路兩輪都沒找到怪或 Boss，請手動移動到有怪的地方後再開始。"
+                else "探路兩輪都沒找到主線目標，可能需要先踩地上的踏板開門，請手動處理後再開始。")
             patrolStep = 0
             return
         }

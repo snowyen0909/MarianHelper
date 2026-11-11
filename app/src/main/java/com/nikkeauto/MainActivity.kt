@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -257,6 +258,9 @@ private fun SettingsScreen(prefs: Prefs, openA11y: () -> Unit) {
                     HorizontalDivider()
                     ToggleRow(Icons.Filled.Flag, "只打主線目標", "關閉後沒有主線時也會打普通紅圈怪",
                         prefs.onlyMain) { prefs.onlyMain = it }
+                    HorizontalDivider()
+                    ToggleRow(Icons.Filled.SkipNext, "困難模式自動切章", "困難模式打完 Boss 自動進入下一章（關閉則打完就停止）",
+                        prefs.hardNextChapter) { prefs.hardNextChapter = it }
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Text(
