@@ -148,12 +148,14 @@ object Vision {
                     if (!seen[q] && dil[q]) { seen[q] = true; stack[sp++] = q }
                 }
             }
-            if (n < 120 || cells.isEmpty()) continue
+            // 橫屏視野比較遠，怪也比較小
+            val land = w > h
+            if (n < (if (land) 70 else 120) || cells.isEmpty()) continue
             val bl = Blob(l * c, t * c, r * c + c - 1, b * c + c - 1, n)
-            if (bl.w < 24 || inUi(bl, w, h)) continue
+            if (bl.w < (if (land) 16 else 24) || inUi(bl, w, h)) continue
             if (whiteRatio(cls, w, bl) >= 0.15f) continue          // EX 方向指示（菱形中間白底）
             if (exAbove(px, w, h, bl) >= 1200) continue            // EX 關卡
-            if (n >= 4000) {
+            if (n >= (if (land) 1800 else 4000)) {
                 // Boss：點下半部的光圈，不點上面的三角光柱
                 val cut = bl.t + bl.h * 0.6f
                 var bx = 0f; var by = 0f; var bn = 0
